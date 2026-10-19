@@ -1,9 +1,20 @@
 --[[
-    TORT — Blade Ball Fixed & Complete Edition
-    - Fixed: infinite wait loop, kick protection thread hang, UI loading order
-    - Features: Auto Parry, Spam, ESP, Visuals, AI, Rewards, etc.
+    TORT — Blade Ball Edition (v2)
+    - Auto Parry, Spam, ESP, Visuals, AI, Rewards
     - Mobile + PC Support
     - Original: Argon Hub X / TORT by AgentX771
+
+    v2 fixes
+    - Remote hook now walks the whole tree: Blade Ball nests its remotes inside
+      folders, so the old code never hooked anything and Auto Parry never fired.
+    - Parry remote is picked by name and replayed; if none is found it falls back
+      to pressing the block key / mouse instead of a broken VirtualInputManager call.
+    - ESP is built in (the old version downloaded a file that no longer exists).
+    - Wired up toggles that did nothing: Player Safety, Anti Phantom Attack,
+      Death Slash / Time Hole / Auto Telekinesis detection, Manual Spam,
+      Improve Accuracy, Bypass Limits, Player Trail, Hit Effect.
+    - Camera is read live, so respawning no longer breaks View Ball / hit sound.
+    - Protection toggle no longer stacks hooks every time it is switched on.
 --]]
 
 if getgenv().TORT_Loaded then return end
@@ -1479,16 +1490,237 @@ local IsMobile = game:GetService("UserInputService").TouchEnabled and not game:G
 -- ============================================================
 -- 1. ESP LINES (optional, loaded via HttpGet)
 -- ============================================================
-local ESPLines
+
+-- ============================================================
+-- 1. ESP LINES (built in - the old version fetched a file that no longer exists)
+-- ============================================================
+local ESPLines = {
+    Enabled = false, ShowBox = false, ShowName = false,
+    ShowHealth = false, ShowTracer = false, ShowDistance = false, BoxType = "2D"
+}
 do
-    local ok, res = pcall(function()
-        return loadstring(game:HttpGet("https://raw.githubusercontent.com/AgentX771/ArgonHubX/refs/heads/main/Privating/ESPLines.lua"))()
-    end)
-    ESPLines = ok and res or {
-        Enabled = false, ShowBox = false, ShowName = false,
-        ShowHealth = false, ShowTracer = false, ShowDistance = false, BoxType = "2D"
-    }
-    if ESPLines.Enabled ~= nil then ESPLines.Enabled = true end
+    local ESP = ESPLines
+    local ESPGui
+    local ESPFrames = {}
+    local ESPPlayers = game:GetService("Players")
+    local ESPLocalPlayer = ESPPlayers.LocalPlayer
+    local ESPRunService = game:GetService("RunService")
+    local ESP_FAR = Color3.fromRGB(0, 255, 128)
+    local ESP_MID = Color3.fromRGB(255, 220, 0)
+    local ESP_NEAR = Color3.fromRGB(255, 70, 70)
+
+    local function ensureGui()
+        if ESPGui and ESPGui.Parent then return ESPGui end
+        local parent = (gethui and gethui()) or game:GetService("CoreGui")
+        local existing = parent:FindFirstChild("TORT_ESP")
+        if existing then ESPGui = existing; return ESPGui end
+        ESPGui = Instance.new("ScreenGui")
+        ESPGui.Name = "TORT_ESP"
+        ESPGui.ResetOnSpawn = false
+        ESPGui.IgnoreGuiInset = true
+        ESPGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        ESPGui.Parent = parent
+        return ESPGui
+    end
+
+    local function newObject(className, parent)
+        local object = Instance.new(className)
+        object.BorderSizePixel = 0
+        object.Parent = parent
+        return object
+    end
+
+    local function newLabel(parent)
+        local label = Instance.new("TextLabel")
+        label.BackgroundTransparency = 1
+        label.BorderSizePixel = 0
+        label.Font = Enum.Font.GothamBold
+        label.TextSize = 13
+        label.TextColor3 = Color3.new(1, 1, 1)
+        label.TextStrokeTransparency = 0
+        label.TextStrokeColor3 = Color3.new(0, 0, 0)
+        label.Visible = false
+        label.Parent = parent
+        return label
+    end
+
+    local function createESP(player)
+        local gui = ensureGui()
+        local esp = {Corners = {}}
+        esp.Box = newObject("Frame", gui)
+        esp.Box.BackgroundTransparency = 1
+        esp.Box.Visible = false
+        esp.Stroke = Instance.new("UIStroke")
+        esp.Stroke.Color = Color3.new(1, 1, 1)
+        esp.Stroke.Thickness = 1
+        esp.Stroke.Parent = esp.Box
+        for index = 1, 8 do
+            local corner = newObject("Frame", esp.Box)
+            corner.BackgroundColor3 = Color3.new(1, 1, 1)
+            corner.Visible = false
+            esp.Corners[index] = corner
+        end
+        esp.HealthBar = newObject("Frame", gui)
+        esp.HealthBar.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+        esp.HealthBar.Visible = false
+        esp.HealthFill = newObject("Frame", esp.HealthBar)
+        esp.HealthFill.BackgroundColor3 = Color3.fromRGB(0, 255, 128)
+        esp.HealthFill.AnchorPoint = Vector2.new(0, 1)
+        esp.NameLabel = newLabel(gui)
+        esp.NameLabel.Text = player.Name
+        esp.DistanceLabel = newLabel(gui)
+        esp.DistanceLabel.Font = Enum.Font.Gotham
+        esp.DistanceLabel.TextSize = 12
+        esp.DistanceLabel.TextColor3 = Color3.fromRGB(220, 220, 220)
+        esp.Tracer = newObject("Frame", gui)
+        esp.Tracer.AnchorPoint = Vector2.new(0.5, 0.5)
+        esp.Tracer.Visible = false
+        return esp
+    end
+
+    local function destroyESP(player)
+        local esp = ESPFrames[player]
+        if not esp then return end
+        ESPFrames[player] = nil
+        for _, object in ipairs({esp.Box, esp.HealthBar, esp.NameLabel, esp.DistanceLabel, esp.Tracer}) do
+            if object then object:Destroy() end
+        end
+    end
+
+    local function hideESP(esp)
+        esp.Box.Visible = false
+        esp.HealthBar.Visible = false
+        esp.NameLabel.Visible = false
+        esp.DistanceLabel.Visible = false
+        esp.Tracer.Visible = false
+        for _, corner in ipairs(esp.Corners) do corner.Visible = false end
+    end
+
+    local function setCorner(corner, x, y, width, height)
+        corner.Position = UDim2.fromOffset(x, y)
+        corner.Size = UDim2.fromOffset(width, height)
+    end
+
+    local function renderESP()
+        if not ESP.Enabled then
+            for _, esp in pairs(ESPFrames) do hideESP(esp) end
+            return
+        end
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+        local viewport = camera.ViewportSize
+        local alive = {}
+        for _, player in ipairs(ESPPlayers:GetPlayers()) do
+            if player ~= ESPLocalPlayer then
+                local character = player.Character
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                local root = character and character:FindFirstChild("HumanoidRootPart")
+                if humanoid and root and humanoid.Health > 0 then
+                    local head = character:FindFirstChild("Head")
+                    local topWorld = (head and head.Position or root.Position) + Vector3.new(0, 0.9, 0)
+                    local bottomWorld = root.Position - Vector3.new(0, 3, 0)
+                    local topPoint, topVisible = camera:WorldToViewportPoint(topWorld)
+                    local bottomPoint, bottomVisible = camera:WorldToViewportPoint(bottomWorld)
+                    if topVisible or bottomVisible then
+                        local height = math.max(math.abs(topPoint.Y - bottomPoint.Y), 18)
+                        local width = math.max(height * 0.6, 12)
+                        local left = topPoint.X - width / 2
+                        local top = math.min(topPoint.Y, bottomPoint.Y)
+                        local distance = (root.Position - camera.CFrame.Position).Magnitude
+                        local color = ESP_FAR
+                        if distance <= 60 then
+                            color = ESP_NEAR
+                        elseif distance <= 140 then
+                            color = ESP_MID
+                        end
+
+                        local esp = ESPFrames[player]
+                        if not esp then
+                            esp = createESP(player)
+                            ESPFrames[player] = esp
+                        end
+                        alive[player] = true
+
+                        esp.Box.Position = UDim2.fromOffset(left, top)
+                        esp.Box.Size = UDim2.fromOffset(width, height)
+                        esp.Box.Visible = ESP.ShowBox
+                        esp.Stroke.Enabled = ESP.ShowBox and ESP.BoxType ~= "Corner Box Esp"
+                        esp.Stroke.Color = color
+
+                        local thickness = 2
+                        local cornerWidth = math.max(math.floor(width * 0.3), 6)
+                        local cornerHeight = math.max(math.floor(height * 0.15), 6)
+                        for _, corner in ipairs(esp.Corners) do
+                            corner.BackgroundColor3 = color
+                            corner.Visible = ESP.ShowBox and ESP.BoxType == "Corner Box Esp"
+                        end
+                        setCorner(esp.Corners[1], 0, 0, cornerWidth, thickness)
+                        setCorner(esp.Corners[2], 0, 0, thickness, cornerHeight)
+                        setCorner(esp.Corners[3], width - cornerWidth, 0, cornerWidth, thickness)
+                        setCorner(esp.Corners[4], width - thickness, 0, thickness, cornerHeight)
+                        setCorner(esp.Corners[5], 0, height - thickness, cornerWidth, thickness)
+                        setCorner(esp.Corners[6], 0, height - cornerHeight, thickness, cornerHeight)
+                        setCorner(esp.Corners[7], width - cornerWidth, height - thickness, cornerWidth, thickness)
+                        setCorner(esp.Corners[8], width - thickness, height - cornerHeight, thickness, cornerHeight)
+
+                        if ESP.ShowHealth then
+                            local ratio = 0
+                            if humanoid.MaxHealth > 0 then
+                                ratio = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+                            end
+                            esp.HealthBar.Visible = true
+                            esp.HealthBar.Position = UDim2.fromOffset(left - 7, top)
+                            esp.HealthBar.Size = UDim2.fromOffset(4, height)
+                            esp.HealthFill.Size = UDim2.new(1, 0, ratio, 0)
+                            esp.HealthFill.BackgroundColor3 = Color3.fromRGB(
+                                math.floor(255 * (1 - ratio)), math.floor(255 * ratio), 40)
+                        else
+                            esp.HealthBar.Visible = false
+                        end
+
+                        if ESP.ShowName then
+                            esp.NameLabel.Visible = true
+                            esp.NameLabel.Text = player.Name
+                            esp.NameLabel.Position = UDim2.fromOffset(left - 40, top - 17)
+                            esp.NameLabel.Size = UDim2.fromOffset(width + 80, 16)
+                            esp.NameLabel.TextColor3 = color
+                        else
+                            esp.NameLabel.Visible = false
+                        end
+
+                        if ESP.ShowDistance then
+                            esp.DistanceLabel.Visible = true
+                            esp.DistanceLabel.Text = string.format("[%d studs]", math.floor(distance))
+                            esp.DistanceLabel.Position = UDim2.fromOffset(left - 40, top + height + 2)
+                            esp.DistanceLabel.Size = UDim2.fromOffset(width + 80, 14)
+                        else
+                            esp.DistanceLabel.Visible = false
+                        end
+
+                        if ESP.ShowTracer then
+                            local fromX, fromY = viewport.X / 2, viewport.Y
+                            local toX, toY = left + width / 2, top + height
+                            local deltaX, deltaY = toX - fromX, toY - fromY
+                            local length = math.sqrt(deltaX * deltaX + deltaY * deltaY)
+                            esp.Tracer.Visible = true
+                            esp.Tracer.BackgroundColor3 = color
+                            esp.Tracer.Position = UDim2.fromOffset((fromX + toX) / 2, (fromY + toY) / 2)
+                            esp.Tracer.Size = UDim2.fromOffset(length, 1)
+                            esp.Tracer.Rotation = math.deg(math.atan2(deltaY, deltaX))
+                        else
+                            esp.Tracer.Visible = false
+                        end
+                    end
+                end
+            end
+        end
+        for player, esp in pairs(ESPFrames) do
+            if not alive[player] then hideESP(esp) end
+        end
+    end
+
+    ESPPlayers.PlayerRemoving:Connect(destroyESP)
+    ESPRunService.RenderStepped:Connect(renderESP)
 end
 
 -- ============================================================
@@ -1501,7 +1733,7 @@ function GetClosestPlayer()
     local closestTarget = nil
     local myChar = LocalPlayer.Character
     if not myChar or not myChar:FindFirstChild("HumanoidRootPart") then return nil end
-    for _, v in pairs(workspace.Alive:GetChildren()) do
+    for _, v in pairs(workspace:FindFirstChild("Alive") and workspace.Alive:GetChildren() or {}) do
         if v:FindFirstChild("HumanoidRootPart") and v ~= myChar then
             local distance = (myChar.HumanoidRootPart.Position - v.HumanoidRootPart.Position).Magnitude
             if distance < closestDistance then
@@ -1643,6 +1875,7 @@ local function GetClosestPlayerLocal()
 end
 
 local function GetDirection()
+    local Camera = workspace.CurrentCamera or Camera
     if EnableAntiCurve then
         return (Camera.CFrame * CFrame.new(0, 0, -500)).Position
     elseif EnableAutoCurve then
@@ -1708,75 +1941,184 @@ local function GetDirection()
     return Camera.CFrame.LookVector
 end
 
-local function isValidRemoteArgs(args)
-    return #args == 7 and type(args[2]) == "string" and type(args[3]) == "number"
-        and typeof(args[4]) == "CFrame" and type(args[5]) == "table"
-        and type(args[6]) == "table" and type(args[7]) == "boolean"
+-- Blade Ball keeps its remotes nested inside folders (ReplicatedStorage.Remotes,
+-- ReplicatedStorage.Packages._Index.sleitnick_net@0.1.0.net, ...). Reading only
+-- ReplicatedStorage:GetChildren() never found them, so nothing was ever hooked.
+local cframeRemotes = {}
+local hookedRemotes = {}
+local PARRY_NAME_HINTS = {"parry", "block", "swing"}
+
+local function findCFrameArg(args)
+    for index = 1, #args do
+        if typeof(args[index]) == "CFrame" then return index end
+    end
+    return nil
+end
+
+local function recordRemoteFire(remote, args)
+    local index = findCFrameArg(args)
+    local name = string.lower(remote.Name)
+    for _, hint in ipairs(PARRY_NAME_HINTS) do
+        if string.find(name, hint, 1, true) then
+            revertedRemotes[remote] = {Index = index, Args = args}
+            return
+        end
+    end
+    if index then
+        cframeRemotes[remote] = {Index = index, Args = args}
+    end
 end
 
 local function hookRemote(remote)
-    if not revertedRemotes[remote] then
-        local meta = getrawmetatable(remote)
-        if not originalMetatables[meta] then
-            originalMetatables[meta] = true
-            setreadonly(meta, false)
-            local oldIndex = meta.__index
-            meta.__index = function(self, key)
-                if key == "FireServer" and self:IsA("RemoteEvent") then
-                    return function(_, ...)
-                        local args = { ... }
-                        if isValidRemoteArgs(args) and not revertedRemotes[self] then
-                            revertedRemotes[self] = args
-                        end
-                        return oldIndex(self, "FireServer")(_, table.unpack(args))
-                    end
-                elseif key == "InvokeServer" and self:IsA("RemoteFunction") then
-                    return function(_, ...)
-                        local args = { ... }
-                        if isValidRemoteArgs(args) and not revertedRemotes[self] then
-                            revertedRemotes[self] = args
-                        end
-                        return oldIndex(self, "InvokeServer")(_, table.unpack(args))
-                    end
-                end
-                return oldIndex(self, key)
+    if hookedRemotes[remote] then return end
+    hookedRemotes[remote] = true
+    local ok, meta = pcall(getrawmetatable, remote)
+    if not ok or type(meta) ~= "table" then return end
+    if originalMetatables[meta] then return end
+    originalMetatables[meta] = true
+    local wasReadonly = false
+    if isreadonly then
+        local okReadonly, result = pcall(isreadonly, meta)
+        wasReadonly = okReadonly and result and true or false
+    end
+    if wasReadonly then setreadonly(meta, false) end
+    local oldIndex = meta.__index
+    meta.__index = function(self, key)
+        if key == "FireServer" and self:IsA("RemoteEvent") then
+            return function(_, ...)
+                local args = {...}
+                pcall(recordRemoteFire, self, args)
+                return oldIndex(self, "FireServer")(_, table.unpack(args))
             end
-            setreadonly(meta, true)
+        elseif key == "InvokeServer" and self:IsA("RemoteFunction") then
+            return function(_, ...)
+                local args = {...}
+                pcall(recordRemoteFire, self, args)
+                return oldIndex(self, "InvokeServer")(_, table.unpack(args))
+            end
         end
+        return oldIndex(self, key)
+    end
+    if wasReadonly then setreadonly(meta, true) end
+end
+
+local function hookRemoteTree(root)
+    if not root then return end
+    for _, object in ipairs(root:GetDescendants()) do
+        if object:IsA("RemoteEvent") or object:IsA("RemoteFunction") then hookRemote(object) end
     end
 end
 
 if hookSupport then
-    for _, remote in pairs(game.ReplicatedStorage:GetChildren()) do
-        if remote:IsA("RemoteEvent") or remote:IsA("RemoteFunction") then hookRemote(remote) end
-    end
-    game.ReplicatedStorage.ChildAdded:Connect(function(child)
+    local replicatedStorage = game:GetService("ReplicatedStorage")
+    hookRemoteTree(replicatedStorage)
+    replicatedStorage.DescendantAdded:Connect(function(child)
         if child:IsA("RemoteEvent") or child:IsA("RemoteFunction") then hookRemote(child) end
     end)
 end
 
-local Global = { cooldown = false, last_hit = 0, parry_count = 0 }
-
-local function ParryFunction()
-    if hookSupport then
-        for remote, args in pairs(revertedRemotes) do
-            if typeof(remote) ~= "Instance" then continue end
-            if not remote:IsDescendantOf(game) then continue end
-            if remote:IsA("RemoteEvent") then
-                args[4] = CFrame.new(LocalPlayer.Character.HumanoidRootPart.Position, LocalPlayer.Character.HumanoidRootPart.Position + GetDirection())
-                remote:FireServer(unpack(args))
-            elseif remote:IsA("RemoteFunction") then
-                args[4] = CFrame.new(LocalPlayer.Character.HumanoidRootPart.Position, LocalPlayer.Character.HumanoidRootPart.Position + GetDirection())
-                remote:InvokeServer(unpack(args))
+-- Picks the most likely "parry" remote out of everything we have seen fire.
+local function pickParryRemote()
+    local best, bestScore
+    local function consider(store, base)
+        for remote, entry in pairs(store) do
+            if typeof(remote) == "Instance" and remote:IsDescendantOf(game) then
+                local name = string.lower(remote.Name)
+                local score = base
+                for _, hint in ipairs(PARRY_NAME_HINTS) do
+                    if string.find(name, hint, 1, true) then score = score + 10 end
+                end
+                if entry.Index then score = score + 1 end
+                if score > (bestScore or -1) then best, bestScore = remote, score end
+            else
+                store[remote] = nil
             end
         end
-    else
-        game:GetService("VirtualInputManager"):SendMouseButtonEvent(0, 0, 0, true, game, 1)
     end
+    consider(revertedRemotes, 100)
+    consider(cframeRemotes, 0)
+    return best
 end
 
--- ============================================================
--- 6. CHARACTER HELPERS
+local function ballForParry()
+    local container = workspace:FindFirstChild("Balls")
+    if not container then return nil end
+    local fallback
+    for _, ball in ipairs(container:GetChildren()) do
+        if ball:IsA("BasePart") then
+            if ball:GetAttribute("realBall") then return ball end
+            fallback = fallback or ball
+        end
+    end
+    return fallback
+end
+
+-- Fallback when no remote could be replayed: press the block key / mouse.
+local function simulateParryInput()
+    local key = getgenv().TORT_ParryKey or Enum.KeyCode.F
+    if keypress and keyrelease then
+        local ok = pcall(function()
+            keypress(key)
+            task.wait(0.05)
+            keyrelease(key)
+        end)
+        if ok then return true end
+    end
+    local okVim, vim = pcall(function() return game:GetService("VirtualInputManager") end)
+    if okVim and vim then
+        local ok = pcall(function()
+            vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+            task.wait(0.05)
+            vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+        end)
+        if ok then return true end
+    end
+    if mouse1click then
+        local ok = pcall(mouse1click)
+        if ok then return true end
+    end
+    return false
+end
+
+local lastParryFire = -math.huge
+
+local function ParryFunction()
+    local now = os.clock()
+    if now - lastParryFire < 0.02 then return false end
+    lastParryFire = now
+    local character = LocalPlayer.Character
+    local hrp = character and character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+
+    local aim = GetDirection()
+    local ball = ballForParry()
+    if ball then
+        local offset = ball.Position - hrp.Position
+        if offset.Magnitude > 0.01 then aim = offset.Unit end
+    end
+
+    local remote = hookSupport and pickParryRemote() or nil
+    if remote then
+        local entry = revertedRemotes[remote] or cframeRemotes[remote]
+        if entry then
+            if entry.Index then
+                entry.Args[entry.Index] = CFrame.new(hrp.Position, hrp.Position + aim)
+            end
+            local args = entry.Args
+            local fired = pcall(function()
+                if remote:IsA("RemoteEvent") then
+                    remote:FireServer(table.unpack(args))
+                elseif remote:IsA("RemoteFunction") then
+                    remote:InvokeServer(table.unpack(args))
+                end
+            end)
+            if fired then return true end
+        end
+    end
+
+    simulateParryInput()
+    return false
+end
 -- ============================================================
 local function get_character() return LocalPlayer.Character end
 local function get_humanoid_root_part()
@@ -1851,7 +2193,7 @@ local function ai_play()
             local targetPosition = ballPosition + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))
             if is_path_clear(targetPosition) then humanoid:MoveTo(targetPosition) end
         end
-        for _, enemy in pairs(workspace:FindFirstChild("Alive"):GetChildren()) do
+        for _, enemy in pairs(workspace:FindFirstChild("Alive") and workspace.Alive:GetChildren() or {}) do
             if enemy:IsA("Model") and enemy ~= character and enemy:FindFirstChild("HumanoidRootPart") then
                 local enemyHRP = enemy.HumanoidRootPart
                 local distance = (enemyHRP.Position - ballPosition).Magnitude
@@ -1892,7 +2234,7 @@ spawn(function()
                         end
                     end
                     if not targetPosition then
-                        for _, p in pairs(workspace.Alive:GetChildren()) do
+                        for _, p in pairs(workspace:FindFirstChild("Alive") and workspace.Alive:GetChildren() or {}) do
                             if p ~= character and p:FindFirstChild("HumanoidRootPart") then
                                 targetPosition = p.HumanoidRootPart.Position + Vector3.new(AutoWalkDistanceX, 0, AutoWalkDistanceZ)
                                 break
@@ -1902,6 +2244,24 @@ spawn(function()
                     if targetPosition then
                         local hum = character:FindFirstChildOfClass("Humanoid")
                         if hum then hum:MoveTo(targetPosition) end
+                    end
+                end
+            end)
+        end
+        if PlayerSaftey then
+            pcall(function()
+                local character = LocalPlayer.Character
+                local hrp = character and character:FindFirstChild("HumanoidRootPart")
+                local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+                if hrp and humanoid then
+                    local closest = GetClosestPlayer()
+                    local target = closest and closest:FindFirstChild("HumanoidRootPart")
+                    if target then
+                        local offset = hrp.Position - target.Position
+                        local distance = offset.Magnitude
+                        if distance > 0.01 and distance < PlayerSaftey_Distance then
+                            humanoid:MoveTo(hrp.Position + offset.Unit * (PlayerSaftey_Distance + 5))
+                        end
                     end
                 end
             end)
@@ -1976,19 +2336,28 @@ pcall(function()
     end)
 end)
 
+-- Remember which key the game has block bound to (used by the input fallback).
+getgenv().TORT_ParryKey = getgenv().TORT_ParryKey or Enum.KeyCode.F
+
 pcall(function()
-    local connections = getconnections(game:GetService("Players").LocalPlayer.PlayerGui.Hotbar.Block.Activated)
-    if connections then
-        for _, Value in pairs(connections) do
-            if Value and typeof(Value) == "table" and Value.Function and not iscclosure(Value.Function) then
-                local successUpvalues, upvalues = pcall(getupvalues, Value.Function)
-                if successUpvalues and type(upvalues) == "table" then
-                    for _, Value2 in pairs(upvalues) do
-                        if type(Value2) == "function" then
-                            local successKey, result = pcall(function()
-                                return getupvalue(getupvalue(Value2, 2), 17)
-                            end)
-                            if successKey then Parry_Key = result end
+    if not getconnections then return end
+    local hotbar = LocalPlayer:FindFirstChild("PlayerGui")
+    hotbar = hotbar and hotbar:FindFirstChild("Hotbar")
+    local blockButton = hotbar and hotbar:FindFirstChild("Block")
+    if not blockButton then return end
+    local connections = getconnections(blockButton.Activated)
+    if not connections then return end
+    for _, connection in pairs(connections) do
+        if connection and typeof(connection) == "table" and connection.Function and not iscclosure(connection.Function) then
+            local okUpvalues, upvalues = pcall(getupvalues, connection.Function)
+            if okUpvalues and type(upvalues) == "table" then
+                for _, value in pairs(upvalues) do
+                    if type(value) == "function" then
+                        local okKey, result = pcall(function()
+                            return getupvalue(getupvalue(value, 2), 17)
+                        end)
+                        if okKey and typeof(result) == "EnumItem" then
+                            getgenv().TORT_ParryKey = result
                         end
                     end
                 end
@@ -1996,13 +2365,6 @@ pcall(function()
         end
     end
 end)
-
-local Parry_Key = nil
-
-local function Parry(...)
-    local ShouldPlayerJump, MainRemote, GetOpponentPosition
-    -- These will be populated via the hooking system
-end
 
 -- ============================================================
 -- 10. AUTO PARRY / SPAM / LOBBY AP
@@ -2042,6 +2404,12 @@ local function StartAutoParry()
             end
             local speed_divisor = speed_divisor_base * effectiveMultiplier
             local Parry_Accuracy = Ping_Threshold + math.max(Speed / speed_divisor, 9.5)
+            if getgenv().ImproveAccuracy then
+                Parry_Accuracy = Parry_Accuracy + math.min(Speed * 0.012, 12)
+            end
+            if getgenv().bypass_limits_Enabled then
+                Parry_Accuracy = math.max(Parry_Accuracy, 999)
+            end
             local Curved = false
             if Zoomies then
                 -- Simple curve check
@@ -2129,6 +2497,26 @@ local function StartAutoSpam()
     end)
 end
 
+local function StartManualSpam()
+    if Connections_Manager['Manual Spam'] then return end
+    getgenv().ManualSpamKey = getgenv().ManualSpamKey or Enum.KeyCode.E
+    Connections_Manager['Manual Spam'] = RunService.PreSimulation:Connect(function()
+        if not getgenv().ManualSpamActive then return end
+        local ball = ballForParry()
+        if not ball then return end
+        local character = LocalPlayer.Character
+        local hrp = character and character:FindFirstChild("HumanoidRootPart")
+        if not hrp then return end
+        local zoomies = ball:FindFirstChild('zoomies')
+        if not zoomies then return end
+        local distance = (hrp.Position - ball.Position).Magnitude
+        local speed = zoomies.VectorVelocity.Magnitude
+        if distance <= (40 + math.min(speed / 6, 60)) then
+            ParryFunction()
+        end
+    end)
+end
+
 local function StartLobbyAP()
     Connections_Manager['Lobby AP'] = RunService.Heartbeat:Connect(function()
         local training = workspace:FindFirstChild("TrainingBalls")
@@ -2145,7 +2533,12 @@ local function StartLobbyAP()
                         local Ping = game:GetService('Stats').Network.ServerStatsItem['Data Ping']:GetValue() / 10
                         local cappedSpeedDiff = math.min(math.max(Speed - 9.5, 0), 650)
                         local base = 2.4 + cappedSpeedDiff * 0.002
-                        local acc = Ping + math.max(Speed / (base * LobbyAP_Speed_Divisor_Multiplier), 9.5)
+                        local lobbyMultiplier = LobbyAP_Speed_Divisor_Multiplier
+                        if getgenv().LobbyAPRandomParryAccuracyEnabled then
+                            lobbyMultiplier = lobbyMultiplier * (0.7 + (math.random(1, 100) - 1) * (0.35 / 99))
+                        end
+                        local acc = Ping + math.max(Speed / (base * lobbyMultiplier), 9.5)
+                        if getgenv().bypass_limits_Enabled then acc = math.max(acc, 999) end
                         if Distance <= acc then
                             ParryFunction()
                             Training_Parried = true
@@ -2175,6 +2568,55 @@ Balls.ChildAdded:Connect(function(Value)
             end
         end
     end)
+end)
+
+-- Death Slash / Time Hole / Auto Telekinesis detection.
+-- These toggles used to change a variable nobody read, so they did nothing.
+local VFX_DETECTIONS = {
+    {Key = "DeathSlashDetection", Patterns = {"deathslash", "death_slash", "deathslashattack"}},
+    {Key = "TimeHoleDetection", Patterns = {"timehole", "time_hole"}},
+    {Key = "AutoTelekinesis", Patterns = {"telekinesis", "telekinesisvfx"}},
+}
+
+task.spawn(function()
+    while task.wait(0.05) do
+        local anyEnabled = false
+        for _, detection in ipairs(VFX_DETECTIONS) do
+            if getgenv()[detection.Key] then anyEnabled = true; break end
+        end
+        if anyEnabled then
+            pcall(function()
+                local folders = {}
+                if Runtime then table.insert(folders, Runtime) end
+                local balls = workspace:FindFirstChild("Balls")
+                if balls then table.insert(folders, balls) end
+                local character = LocalPlayer.Character
+                local hrp = character and character:FindFirstChild("HumanoidRootPart")
+                for _, detection in ipairs(VFX_DETECTIONS) do
+                    if getgenv()[detection.Key] then
+                        local matched = false
+                        for _, folder in ipairs(folders) do
+                            for _, object in ipairs(folder:GetDescendants()) do
+                                local name = string.lower(object.Name)
+                                for _, pattern in ipairs(detection.Patterns) do
+                                    if string.find(name, pattern, 1, true) then matched = true; break end
+                                end
+                                if matched then break end
+                            end
+                            if matched then break end
+                        end
+                        if matched and hrp then
+                            local ball = ballForParry()
+                            local closeEnough = ball and (ball.Position - hrp.Position).Magnitude <= 120
+                            if closeEnough or (ball and ball:GetAttribute("target") == tostring(LocalPlayer)) then
+                                ParryFunction()
+                            end
+                        end
+                    end
+                end
+            end)
+        end
+    end
 end)
 
 if Runtime then
@@ -2397,43 +2839,45 @@ local function create_ball_velocity_display(ball)
 end
 
 local lastBall
+local lastVelocityText
 RunService.RenderStepped:Connect(function()
     if not BallVelocity then
         if lastBall and lastBall:FindFirstChild("BallVelocityDisplay") then lastBall.BallVelocityDisplay:Destroy() end
-        lastBall = nil
+        lastBall, lastVelocityText = nil, nil
         return
     end
     local ball = get_ball2()
     if ball ~= lastBall then
         if lastBall and lastBall:FindFirstChild("BallVelocityDisplay") then lastBall.BallVelocityDisplay:Destroy() end
-        if ball then
-            local velocityText = create_ball_velocity_display(ball)
-            lastBall = ball
-            RunService.RenderStepped:Connect(function()
-                if ball and velocityText and BallVelocity then
-                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if hrp then
-                        local distance = (ball.Position - hrp.Position).Magnitude
-                        velocityText.Text = string.format("Ball Velocity: %.2f", ball.Velocity.Magnitude)
-                        if distance > 70 then velocityText.TextColor3 = Color3.fromRGB(0, 255, 0)
-                        elseif distance > 30 then velocityText.TextColor3 = Color3.fromRGB(255, 255, 0)
-                        else velocityText.TextColor3 = Color3.fromRGB(255, 0, 0) end
-                    end
-                end
-            end)
+        lastBall = ball
+        lastVelocityText = ball and create_ball_velocity_display(ball) or nil
+    end
+    if lastBall and lastVelocityText and lastBall.Parent then
+        local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local velocity = lastBall.AssemblyLinearVelocity or lastBall.Velocity
+            local distance = (lastBall.Position - hrp.Position).Magnitude
+            lastVelocityText.Text = string.format("Ball Velocity: %.2f", velocity.Magnitude)
+            if distance > 70 then lastVelocityText.TextColor3 = Color3.fromRGB(0, 255, 0)
+            elseif distance > 30 then lastVelocityText.TextColor3 = Color3.fromRGB(255, 255, 0)
+            else lastVelocityText.TextColor3 = Color3.fromRGB(255, 0, 0) end
         end
     end
 end)
 
 -- View Ball / Rotate
-local camera = workspace.CurrentCamera
-local function resetCamera() camera.CameraType = Enum.CameraType.Custom end
+local function resetCamera()
+    local camera = workspace.CurrentCamera
+    if camera then camera.CameraType = Enum.CameraType.Custom end
+end
 
 local function startViewBallLoop()
     if _G.viewConnection then _G.viewConnection:Disconnect(); _G.viewConnection = nil end
     _G.viewConnection = RunService.RenderStepped:Connect(function()
         local ball = getBall()
-        if _G.AgentX77 and ball then
+        local camera = workspace.CurrentCamera
+        if not camera then return end
+        if (_G.AgentX77 or getgenv().ViewBall) and ball then
             camera.CameraType = Enum.CameraType.Scriptable
             local targetPosition = ball.Position + Vector3.new(0, 5, 15)
             camera.CFrame = CFrame.new(camera.CFrame.Position:Lerp(targetPosition, 0.05), ball.Position)
@@ -2462,8 +2906,8 @@ spawn(function()
     local Ball = workspace:WaitForChild("Balls")
     local DeadFolder = workspace:FindFirstChild("Dead")
     local currentTween = nil
-    getgenv().FollowSpeed = 1
-    getgenv().FollowDistance = 1000
+    getgenv().FollowSpeed = getgenv().FollowSpeed or 10
+    getgenv().FollowDistance = getgenv().FollowDistance or 50
     while true do
         wait(0.001)
         if getgenv().FB then
@@ -2521,8 +2965,10 @@ end
 function setHitSound(soundId) hit_Sound.SoundId = soundId end
 
 RunService.RenderStepped:Connect(function()
-    if LocalPlayer.Character and LocalPlayer.Character.Head then
-        local dist = (camera.CFrame.Position - LocalPlayer.Character.Head.Position).Magnitude
+    if hit_Sound and LocalPlayer.Character and LocalPlayer.Character.Head then
+        local currentCamera = workspace.CurrentCamera
+        local dist = (currentCamera and currentCamera.CFrame.Position or Vector3.new() - LocalPlayer.Character.Head.Position).Magnitude
+        if dist < 0.1 then dist = 0.1 end
         local newVolume = 5 / (dist * 0.3)
         if newVolume < 0.1 then newVolume = 0.1 elseif newVolume > 5 then newVolume = 5 end
         hit_Sound.Volume = newVolume
@@ -2530,16 +2976,19 @@ RunService.RenderStepped:Connect(function()
 end)
 
 ReplicatedStorage.Remotes.ParrySuccess.OnClientEvent:Connect(function()
-    if getgenv().hit_sound_Enabled then hit_Sound:Play() end
+    if getgenv().hit_sound_Enabled and hit_Sound then hit_Sound:Play() end
     if getgenv().hit_effect_Enabled then
-        local hit_effect = game:GetObjects("rbxassetid://17407244385")[1]
-        hit_effect.Parent = getBall()
-        hit_effect:Emit(3)
-        task.delay(5, function() hit_effect:Destroy() end)
+        local ball = getBall()
+        if ball then
+            local hit_effect = game:GetObjects("rbxassetid://17407244385")[1]
+            hit_effect.Parent = ball
+            hit_effect:Emit(3)
+            task.delay(5, function() pcall(function() hit_effect:Destroy() end) end)
+        end
     end
 end)
 
-initializate('TORT_temp')
+initializate('TORT_Data')
 
 -- ============================================================
 -- 15. AUTO BUY CRATES
@@ -2655,13 +3104,13 @@ HomeTab.create_button({
     callback = function()
         local req = (syn and syn.request) or (http and http.request) or http_request
         local opened = false
-        local JoinDiscord = "https://discord.gg/kG5nqaVYtM"
+        local JoinDiscord = "https://discord.gg/Q7gk2drGpD"
         if req then
             local success, response = pcall(function()
                 return req({
                     Url = 'http://127.0.0.1:6463/rpc?v=1', Method = 'POST',
                     Headers = {['Content-Type'] = 'application/json', ['Origin'] = 'https://discord.com'},
-                    Body = Services.HttpService:JSONEncode({cmd = 'INVITE_BROWSER', nonce = Services.HttpService:GenerateGUID(false), args = {code = 'kG5nqaVYtM'}})
+                    Body = Services.HttpService:JSONEncode({cmd = 'INVITE_BROWSER', nonce = Services.HttpService:GenerateGUID(false), args = {code = 'Q7gk2drGpD'}})
                 })
             end)
             if success and response and response.StatusCode == 200 then opened = true end
@@ -2684,7 +3133,7 @@ HomeTab.create_toggle({
     name = 'Protection - TORT', flag = 'auto_update', section = 'right', enabled = true,
     callback = function(state)
         if state then
-            if hookmetamethod and getnamecallmethod and getrawmetatable and setreadonly then
+            if hookmetamethod and getnamecallmethod and not getgenv().TORT_KickHook then
                 local old
                 old = hookmetamethod(game, "__namecall", function(self, ...)
                     if string.lower(tostring(getnamecallmethod())) == "kick" then
@@ -2693,6 +3142,7 @@ HomeTab.create_toggle({
                     end
                     return old(self, ...)
                 end)
+                getgenv().TORT_KickHook = old
             end
             LibraryNotify:MakeNotify({Title = "TORT:", Description = "Protection", Content = "The Protections have been Activated.", Time = 0.5, Delay = 5})
         else
@@ -2860,11 +3310,25 @@ CombatTab.create_slider({
 CombatTab.create_toggle({
     name = 'Manual Spam', flag = 'manual_spam', section = 'left', enabled = false,
     callback = function(state)
+        getgenv().ManualSpamEnabled = state
+        getgenv().ManualSpamKey = getgenv().ManualSpamKey or Enum.KeyCode.E
         if state then
-            -- ManualSpam GUI will be created
+            StartManualSpam()
+            if not Connections_Manager['Manual Spam Key'] then
+                Connections_Manager['Manual Spam Key'] = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+                    if gameProcessed then return end
+                    if input.KeyCode == getgenv().ManualSpamKey then
+                        getgenv().ManualSpamActive = not getgenv().ManualSpamActive
+                        LibraryNotify:MakeNotify({Title = "TORT:", Description = "Manual Spam", Content = getgenv().ManualSpamActive and "Manual spam ON." or "Manual spam OFF.", Time = 0.5, Delay = 5})
+                    end
+                end)
+            end
             LibraryNotify:MakeNotify({Title = "TORT:", Description = "Manual Spam", Content = "Manual spam activated. Press E to toggle.", Time = 0.5, Delay = 5})
         else
-            if MauaulSpam then MauaulSpam:Destroy(); MauaulSpam = nil end
+            getgenv().ManualSpamActive = false
+            if Connections_Manager['Manual Spam Key'] then Connections_Manager['Manual Spam Key']:Disconnect(); Connections_Manager['Manual Spam Key'] = nil end
+            if Connections_Manager['Manual Spam'] then Connections_Manager['Manual Spam']:Disconnect(); Connections_Manager['Manual Spam'] = nil end
+            LibraryNotify:MakeNotify({Title = "TORT:", Description = "Manual Spam", Content = "Manual spam disabled.", Time = 0.5, Delay = 5})
         end
     end
 })
@@ -2883,6 +3347,7 @@ CombatTab.create_toggle({
     callback = function(state)
         pcall(function()
             _G.AgentX77 = state
+            getgenv().ViewBall = state
             if state then startViewBallLoop()
             else
                 if _G.viewConnection then _G.viewConnection:Disconnect(); _G.viewConnection = nil end
@@ -2904,6 +3369,10 @@ CombatTab.create_toggle({
     name = 'Trial Ball', flag = 'trial_ball', section = 'right', enabled = false,
     callback = function(state) ball_Trail_Enabled = state end
 })
+CombatTab.create_toggle({
+    name = 'Player Trail', flag = 'player_trail', section = 'right', enabled = false,
+    callback = function(state) player_Trail_Enabled = state end
+})
 CombatTab.create_line({section = "right"})
 CombatTab.create_toggle({name = 'Follow Ball', flag = 'follow_ball', section = 'right', enabled = false, callback = function(state) getgenv().FB = state end})
 CombatTab.create_slider({name = 'Follow Speed', flag = 'follow_speed', section = 'right', value = 10, minimum_value = 0, maximum_value = 50, callback = function(v) getgenv().FollowSpeed = v end})
@@ -2914,6 +3383,10 @@ CombatTab.create_toggle({
     name = 'Enable Hit Sound', flag = 'enable_hit_sound', section = 'right', enabled = true,
     callback = function(state) getgenv().hit_sound_Enabled = state end
 })
+CombatTab.create_toggle({
+    name = 'Enable Hit Effect', flag = 'enable_hit_effect', section = 'right', enabled = false,
+    callback = function(state) getgenv().hit_effect_Enabled = state end
+})
 CombatTab.create_dropdown({
     name = 'Sound Effects', flag = 'sound_effects', section = 'right', option = 'Disabled',
     options = {"Disabled", 'DC_15X', 'Minecraft', 'MinecraftHit2', 'Teamfortress Bonk', 'Teamfortress Bell', 'Excalibur', 'Masamune', 'Muramasa', 'Soul Edge', 'Ragnarok', 'Dark Repulser', 'Elucidator', 'Dragon Slayer'},
@@ -2921,13 +3394,13 @@ CombatTab.create_dropdown({
 })
 CombatTab.create_textbox({
     name = 'Volume', flag = 'volume', section = 'right', value = '5',
-    callback = function(v) if tonumber(v) then hit_Sound.Volume = tonumber(v) end end
+    callback = function(v) if tonumber(v) and hit_Sound then hit_Sound.Volume = tonumber(v) end end
 })
 
 CombatTab.create_title({name = 'AI Options', section = 'left'})
 CombatTab.create_toggle({name = 'AI TORT', flag = 'ai_tort', section = 'left', enabled = true, callback = function(state) end})
 CombatTab.create_line({section = "left"})
-CombatTab.create_toggle({name = 'Improve Accuracy', flag = 'ai_auto_parry', section = 'left', enabled = true, callback = function(state) nowprediction = state end})
+CombatTab.create_toggle({name = 'Improve Accuracy', flag = 'ai_auto_parry', section = 'left', enabled = true, callback = function(state) getgenv().ImproveAccuracy = state end})
 CombatTab.create_toggle({name = 'Improve Auto Spam', flag = 'ai_auto_spam', section = 'left', enabled = true, callback = function(state) end})
 
 CombatTab.create_title({name = 'Detections', section = 'left'})
@@ -2942,15 +3415,15 @@ CombatTab.create_toggle({
 })
 CombatTab.create_toggle({
     name = 'Death Slash Detection', flag = 'Toggle_DeathSlashDetection', section = 'left', enabled = true,
-    callback = function(state) DeathSlashDetection = Detections and state or false end
+    callback = function(state) getgenv().DeathSlashDetection = Detections and state or false end
 })
 CombatTab.create_toggle({
     name = 'Time Hole Detection', flag = 'Toggle_TimeHoleDetection', section = 'left', enabled = true,
-    callback = function(state) TimeHoleDetection = Detections and state or false end
+    callback = function(state) getgenv().TimeHoleDetection = Detections and state or false end
 })
 CombatTab.create_toggle({
     name = 'Auto Telekinesis Block', flag = 'Toggle_AutoTelekinesis', section = 'left', enabled = true,
-    callback = function(state) AutoTelekinesis = Detections and state or false end
+    callback = function(state) getgenv().AutoTelekinesis = Detections and state or false end
 })
 CombatTab.create_toggle({
     name = 'Slash of Fury Detection', flag = 'Toggle_SlashOfFuryDetection', section = 'left', enabled = true,
@@ -2958,7 +3431,7 @@ CombatTab.create_toggle({
 })
 CombatTab.create_toggle({
     name = 'Anti Phantom Attack', flag = 'Toggle_AntiPhantom', section = 'left', enabled = false,
-    callback = function(value) PhantomV2Detection = Detections and value or false end
+    callback = function(value) getgenv().PhantomV2Detection = Detections and value or false end
 })
 CombatTab.create_toggle({
     name = 'Cooldown Protection', flag = 'Toggle_CooldownProtection', section = 'left', enabled = true,
@@ -3048,6 +3521,9 @@ SettingsTab.create_button({
         if Connections_Manager['Auto Spam'] then Connections_Manager['Auto Spam']:Disconnect() end
         if Connections_Manager['Lobby AP'] then Connections_Manager['Lobby AP']:Disconnect() end
         if Connections_Manager['Animation Fix'] then Connections_Manager['Animation Fix']:Disconnect() end
+        if Connections_Manager['Manual Spam'] then Connections_Manager['Manual Spam']:Disconnect(); Connections_Manager['Manual Spam'] = nil end
+        if Connections_Manager['Manual Spam Key'] then Connections_Manager['Manual Spam Key']:Disconnect(); Connections_Manager['Manual Spam Key'] = nil end
+        getgenv().ManualSpamActive = false
         getgenv().TORT_Loaded = false
         for _, v in ipairs(Services.CoreGui:GetChildren()) do
             if v.Name == "TORTNotify" then v:Destroy() end
