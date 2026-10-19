@@ -1,8 +1,21 @@
 --[[
-    TORT — Blade Ball Edition (v3)
+    TORT — Blade Ball Edition (v4)
     - Auto Parry, Spam, ESP, Visuals, AI, Rewards
     - Mobile + PC Support
     - Original: Argon Hub X / TORT by AgentX771
+
+    v4 changes (Auto / Manual Spam gating)
+    - Auto Spam used to be dead code and Manual Spam fired at any ball on screen,
+      so the script constantly spammed parry. Both now only fire when the ball is
+      actually locked on to you (ball "target" attribute) and inside your radius.
+    - New helper ballTargetsMe() reads the ball target (Name / tostring / DisplayName)
+      and spamDetectionRadius() reuses the Angeli ping + speed maths.
+    - New Combat controls: "Spam Only When Targeted" toggle, "Spam Radius x",
+      "Manual Spam KPS" and "Manual Spam Distance" sliders. Detection and ping
+      based fire delay are respected again.
+    - Mobile Manual Spam: HOLD now checks the target lock before starting, adds a
+      1.5s watchdog and a global touch-release listener so it can no longer get
+      stuck spamming forever.
 
     v3 changes
     - Parry hook rewritten to the Angeli build: the remote is captured with its
@@ -2680,6 +2693,23 @@ local Connections_Manager = {}
 -- Forward declarations (defined further down, used by the auto parry loop)
 local cooldownProtection, AutoAbility
 
+-- Is the ball locked on to us? Blade Ball stores the target as the player name,
+-- but some builds use tostring(player) or the display name.
+local function ballTargetsMe(ball)
+    if not ball then return false end
+    local target = ball:GetAttribute("target")
+    if target == nil then return false end
+    return target == LocalPlayer.Name
+        or target == tostring(LocalPlayer)
+        or target == LocalPlayer.DisplayName
+end
+
+-- Detection radius used by Auto Spam (same maths as Angeli).
+local function spamDetectionRadius(speed)
+    local pingMs = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    return math.clamp(pingMs / 10, 1, 16) + math.min(speed / 6, 95)
+end
+
 local function calcSpeedDivisorBase(speed)
     return 2.2 + 0.9 * math.log(1 + speed / 80)
 end
@@ -2795,48 +2825,81 @@ local function StartAutoParry()
 end
 
 local function StartAutoSpam()
+    if Connections_Manager['Auto Spam'] then return end
+    local lastSpamFire = 0
     Connections_Manager['Auto Spam'] = RunService.PreSimulation:Connect(function()
-        local Ball = nil
-        for _, b in ipairs(Balls:GetChildren()) do
-            if b:GetAttribute("realBall") then Ball = b; break end
-        end
-        if not Ball then return end
-        local Zoomies = Ball:FindFirstChild('zoomies')
-        if not Zoomies then return end
-        local Ball_Target = Ball:GetAttribute('target')
-        if not Ball_Target then return end
-        local char = LocalPlayer.Character
-        if not char or not char.PrimaryPart then return end
-        local Distance = (char.PrimaryPart.Position - Ball.Position).Magnitude
-        local Speed = Zoomies.VectorVelocity.Magnitude
-        local Ping = game:GetService('Stats').Network.ServerStatsItem['Data Ping']:GetValue()
-        local spamAcc = math.clamp(Ping / 10, 1, 16) + math.min(Speed / 6, 95)
-        if Distance <= spamAcc and Parries > ParryThreshold then
-            ParryFunction()
-        end
+        local flags = getgenv()
+        local ball = BallHelper.get_ball()
+        if not ball then return end
+        local zoomies = ball:FindFirstChild("zoomies")
+        if not zoomies then return end
+        local character = LocalPlayer.Character
+        if not character or not character.PrimaryPart then return end
+        local ballTarget = ball:GetAttribute("target")
+        if not ballTarget then return end
+
+        local velocity = zoomies.VectorVelocity
+        local speed = velocity.Magnitude
+        if speed <= 0 then return end
+        local distance = (character.PrimaryPart.Position - ball.Position).Magnitude
+        local targetingMe = ballTargetsMe(ball)
+
+        if flags.SpamTargetOnly ~= false and not targetingMe then return end
+
+        local maxAccuracy = spamDetectionRadius(speed) * (tonumber(ParryThreshold) or 1)
+        if distance > maxAccuracy then return end
+
+        if flags.InfinityDetection and Det.Infinity_Active then return end
+        if flags.DeathSlashDetection and Det.DeathSlash_Active then return end
+        if flags.TimeHoleDetection and Det.TimeHole_Active then return end
+        if flags.AutoTelekinesis and Det.Pull_Active then return end
+        if flags.SlashOfFuryDetection and Det.Slashes_Active then return end
+        if flags.ForcefieldDetection and Det.Forcefield_Active then return end
+        if character.PrimaryPart:FindFirstChild("SingularityCape") then return end
+
+        local pingMs = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+        local fireDelay = math.max(pingMs / 1000, 0.01)
+        if os.clock() - lastSpamFire < fireDelay then return end
+        lastSpamFire = os.clock()
+        ParryFunction()
     end)
 end
 
 local function StartManualSpam()
     if Connections_Manager['Manual Spam'] then return end
     getgenv().ManualSpamKey = getgenv().ManualSpamKey or Enum.KeyCode.E
+    local lastManualFire = 0
     Connections_Manager['Manual Spam'] = RunService.PreSimulation:Connect(function()
-        if not getgenv().ManualSpamActive then return end
-        local ball = ballForParry()
+        local flags = getgenv()
+        if not flags.ManualSpamActive then return end
+
+        local kps = math.clamp(tonumber(flags.ManualSpamKPS) or 25, 1, 100)
+        if os.clock() - lastManualFire < 1 / kps then return end
+
+        local ball = BallHelper.get_ball()
         if not ball then return end
-        local character = LocalPlayer.Character
-        local hrp = character and character:FindFirstChild("HumanoidRootPart")
-        if not hrp then return end
-        local zoomies = ball:FindFirstChild('zoomies')
-        if not zoomies then return end
-        local distance = (hrp.Position - ball.Position).Magnitude
-        local speed = zoomies.VectorVelocity.Magnitude
-        if distance <= (40 + math.min(speed / 6, 60)) then
-            ParryFunction()
+
+        if flags.ManualSpamTargetOnly ~= false then
+            if not ballTargetsMe(ball) then return end
+            local character = LocalPlayer.Character
+            local hrp = character and character.PrimaryPart
+            if not hrp then return end
+            local limit = tonumber(flags.ManualSpamDistance) or 60
+            if (hrp.Position - ball.Position).Magnitude > limit then return end
+        elseif flags.ManualSpamNeedsBall ~= false then
+            local character = LocalPlayer.Character
+            local hrp = character and character.PrimaryPart
+            if not hrp then return end
+            local zoomies = ball:FindFirstChild("zoomies")
+            if not zoomies then return end
+            local speed = zoomies.VectorVelocity.Magnitude
+            if (hrp.Position - ball.Position).Magnitude > spamDetectionRadius(speed) then return end
         end
+
+        lastManualFire = os.clock()
+        ParryFunction()
     end)
 end
-
 
 -- ============================================================
 -- 10.1 MOBILE MANUAL SPAM UI (touch friendly floating panel)
@@ -2928,7 +2991,7 @@ function MobileSpam.create()
 
     local panel = Instance.new("Frame")
     panel.Name = "Panel"
-    panel.Size = UDim2.new(0, 176, 0, 214)
+    panel.Size = UDim2.new(0, 176, 0, 248)
     panel.Position = UDim2.new(0, 78, 0.34, 0)
     panel.BackgroundColor3 = Color3.fromRGB(16, 16, 20)
     panel.BackgroundTransparency = 0.08
@@ -2959,6 +3022,12 @@ function MobileSpam.create()
     local holdButton = mobileButton(panel, "HOLD SPAM", 80, 44, idle)
     local manualButton = mobileButton(panel, "MANUAL: OFF", 130, 34, idle)
     local autoButton = mobileButton(panel, "AUTO PARRY: ON", 170, 34, good)
+    local lockButton = mobileButton(panel, "SPAM: TARGETED", 210, 30, good)
+
+    local function stopHolding()
+        MobileSpam.holding = false
+        holdButton.BackgroundColor3 = idle
+    end
 
     local function refreshManual()
         local active = getgenv().ManualSpamActive and true or false
@@ -2978,6 +3047,8 @@ function MobileSpam.create()
         if panel.Visible then
             refreshManual()
             refreshAuto()
+        else
+            stopHolding()
         end
     end)
 
@@ -2988,18 +3059,33 @@ function MobileSpam.create()
 
     holdButton.InputBegan:Connect(function(input)
         if not isTouch(input) then return end
+        if not getgenv().ManualSpamTargetOnly then
+            local ball = BallHelper.get_ball()
+            if not ballTargetsMe(ball) then
+                LibraryNotify:MakeNotify({Title = "TORT:", Description = "Hold Spam", Content = "Ball is not locked on you.", Time = 0.5, Delay = 3})
+                return
+            end
+        end
         MobileSpam.holding = true
         holdButton.BackgroundColor3 = accent
         task.spawn(function()
+            local lastRelease = os.clock()
             while MobileSpam.holding do
                 ParryFunction()
                 task.wait(0.03)
+                if os.clock() - lastRelease > 1.5 then
+                    -- no touch updates for 1.5s: assume the finger was lifted
+                    stopHolding()
+                    break
+                end
+                lastRelease = os.clock()
             end
         end)
     end)
-    holdButton.InputEnded:Connect(function()
-        MobileSpam.holding = false
-        holdButton.BackgroundColor3 = idle
+    holdButton.InputEnded:Connect(stopHolding)
+
+    local holdReleaseConnection = UserInputService.InputEnded:Connect(function(input)
+        if MobileSpam.holding and isTouch(input) then stopHolding() end
     end)
 
     manualButton.InputBegan:Connect(function(input)
@@ -3029,11 +3115,28 @@ function MobileSpam.create()
         refreshAuto()
     end)
 
+    lockButton.InputBegan:Connect(function(input)
+        if not isTouch(input) then return end
+        local targetedOnly = not (getgenv().ManualSpamTargetOnly ~= false)
+        getgenv().ManualSpamTargetOnly = not targetedOnly
+        getgenv().SpamTargetOnly = not targetedOnly
+        lockButton.Text = targetedOnly and "SPAM: ANY BALL" or "SPAM: TARGETED"
+        lockButton.BackgroundColor3 = targetedOnly and idle or good
+    end)
+
+    MobileSpam.connections = {holdReleaseConnection}
+
     return gui
 end
 
 function MobileSpam.destroy()
     MobileSpam.holding = false
+    if MobileSpam.connections then
+        for _, connection in ipairs(MobileSpam.connections) do
+            pcall(function() connection:Disconnect() end)
+        end
+        MobileSpam.connections = nil
+    end
     if MobileSpam.gui then
         MobileSpam.gui:Destroy()
         MobileSpam.gui = nil
@@ -3840,9 +3943,26 @@ CombatTab.create_slider({
     end
 })
 CombatTab.create_slider({
-    name = 'Spam Power', flag = 'spam_power', section = 'left',
+    name = 'Spam Radius x', flag = 'spam_power', section = 'left',
     value = 1, minimum_value = 1, maximum_value = 3,
     callback = function(v) ParryThreshold = v end
+})
+CombatTab.create_toggle({
+    name = 'Spam Only When Targeted', flag = 'spam_target_only', section = 'left', enabled = true,
+    callback = function(state)
+        getgenv().SpamTargetOnly = state
+        getgenv().ManualSpamTargetOnly = state
+    end
+})
+CombatTab.create_slider({
+    name = 'Manual Spam KPS', flag = 'manual_spam_kps', section = 'left',
+    value = 25, minimum_value = 1, maximum_value = 100,
+    callback = function(v) getgenv().ManualSpamKPS = v end
+})
+CombatTab.create_slider({
+    name = 'Manual Spam Distance', flag = 'manual_spam_distance', section = 'left',
+    value = 60, minimum_value = 10, maximum_value = 300,
+    callback = function(v) getgenv().ManualSpamDistance = v end
 })
 CombatTab.create_toggle({
     name = 'Mobile Spam UI', flag = 'mobile_spam_ui', section = 'left', enabled = false,
