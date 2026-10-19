@@ -1,8 +1,24 @@
 --[[
-    TORT — Blade Ball Edition (v4)
+    TORT — Blade Ball Edition (v5)
     - Auto Parry, Spam, ESP, Visuals, AI, Rewards
     - Mobile + PC Support
     - Original: Argon Hub X / TORT by AgentX771
+
+    v5 changes (Auto Parry rework + Auto Spam gating + dead toggles)
+    - Auto Parry is now time-to-impact based: it fires when the ball that is
+      locked on to you will reach you inside a small reaction window instead of
+      a huge fixed distance, so it parries on time instead of 100+ studs early.
+    - Auto Parry no longer blocks for 1 second and no longer leaks a
+      GetAttributeChangedSignal connection every frame, so it can re-parry
+      while the ball keeps coming.
+    - Auto Spam only fires when the ball is locked on you, is actually flying
+      towards you and is inside its impact window, with a hard KPS limit.
+    - New Combat controls: Parry Window, Auto Spam Window, Auto Spam KPS.
+    - Wired up toggles that did nothing: AI TORT, Improve Auto Spam,
+      Random Parry Accuracy, Auto Block Spams, Anti Block Spams, the
+      Detections master switch and the Custom Reward dropdown.
+    - Animation Fix now really replays the grab/parry animation (ported from
+      Angeli) instead of a dead Parries counter that never incremented.
 
     v4 changes (Auto / Manual Spam gating)
     - Auto Spam used to be dead code and Manual Spam fired at any ball on screen,
@@ -1809,6 +1825,13 @@ end)
 -- ============================================================
 local auto_rewards_enabled = false
 local reward_interval = 60
+local reward_choice = "All"
+
+-- 'Custom Reward' dropdown (All / Daily / Tasks) used to have an empty
+-- callback, so the choice did nothing.
+local function reward_wants(kind)
+    return reward_choice == "All" or reward_choice == kind
+end
 
 local function claim_rewards()
     pcall(function()
@@ -1818,6 +1841,7 @@ local function claim_rewards()
         end
     end)
     task.defer(function()
+        if not reward_wants("Daily") then return end
         for day = 1, 30 do
             task.wait()
             pcall(function()
@@ -1839,6 +1863,7 @@ local function claim_rewards()
         end
     end)
     task.defer(function()
+        if not reward_wants("Daily") then return end
         for reward = 1, 6 do
             pcall(function()
                 if net and net:FindFirstChild("RF/ClaimPlaytimeReward") then net["RF/ClaimPlaytimeReward"]:InvokeServer(reward) end
@@ -1855,6 +1880,7 @@ local function claim_rewards()
         end
     end)
     task.defer(function()
+        if not reward_wants("Tasks") then return end
         for reward = 1, 5 do
             pcall(function()
                 if net and net:FindFirstChild("RF/RedeemQuestsType") then net["RF/RedeemQuestsType"]:InvokeServer('SummerClashEvent', 'Daily', reward) end
@@ -1862,6 +1888,7 @@ local function claim_rewards()
         end
     end)
     task.defer(function()
+        if not reward_wants("Daily") then return end
         for reward = 1, 4 do
             pcall(function()
                 if net and net:FindFirstChild("RE/SummerWheel/ClaimStreakReward") then net["RE/SummerWheel/ClaimStreakReward"]:FireServer(reward) end
@@ -2321,10 +2348,113 @@ end
 
 local lastParryFire = -math.huge
 
+-- How often ParryFunction may fire. Anti Block Spams slows it down so the
+-- client never hammers the parry remote (looks far less bot-like).
+local function parryFireGap()
+    if getgenv().AntiBlockSpams then return 0.09 end
+    return 0.02
+end
+
+-- Parries fired in the last ~0.5s. Auto Spam / Animation Fix use it to tell a
+-- real parry trade apart from "nothing is happening".
+local Parries = 0
+
+-- ------------------------------------------------------------
+-- Animation Fix (ported from Angeli): replays the grab/parry animation so the
+-- character does not look frozen while parry is being spammed. The old build
+-- gated this on a Parries counter that was never incremented, so it never ran.
+-- ------------------------------------------------------------
+local fixSwordAPI = nil
+local fixAnimCache = {}
+local fixDefaultAnim = nil
+local fixLastPlayed = 0
+
+local function fixFallbackAnimation()
+    if fixDefaultAnim then return fixDefaultAnim end
+    if not fixSwordAPI then return nil end
+    local collection = fixSwordAPI:FindFirstChild("Collection")
+    local default = collection and collection:FindFirstChild("Default")
+    fixDefaultAnim = default and default:FindFirstChild("GrabParry")
+    return fixDefaultAnim
+end
+
+-- Resolving the sword animation uses an Invoke that can yield, so it runs on a
+-- background thread and only writes into the cache. ParryFunction itself never
+-- yields (it is called from a PreSimulation callback).
+local function prewarmFixAnimation()
+    if not fixSwordAPI then return end
+    local char = LocalPlayer.Character
+    local sword = char and char:GetAttribute("CurrentlyEquippedSword")
+    if not sword or fixAnimCache[sword] ~= nil then return end
+    fixAnimCache[sword] = fixFallbackAnimation() or false
+    local collection = fixSwordAPI:FindFirstChild("Collection")
+    local ok, swordData = pcall(function()
+        return ReplicatedStorage.Shared.ReplicatedInstances.Swords.GetSword:Invoke(sword)
+    end)
+    if ok and type(swordData) == "table" and collection then
+        for _, obj in pairs(collection:GetChildren()) do
+            if obj.Name == swordData.AnimationType then
+                local anim = obj:FindFirstChild("GrabParry") or obj:FindFirstChild("Grab")
+                if anim then fixAnimCache[sword] = anim; return end
+            end
+        end
+    end
+end
+
+local function getFixParryAnimation()
+    local char = LocalPlayer.Character
+    local sword = char and char:GetAttribute("CurrentlyEquippedSword")
+    local anim = sword and fixAnimCache[sword]
+    if anim then return anim end
+    return fixFallbackAnimation()
+end
+
+local function playParryFix()
+    if not getgenv().AnimationFix then return end
+    if (os.clock() - fixLastPlayed) < 0.1 then return end
+    fixLastPlayed = os.clock()
+    pcall(function()
+        local char = LocalPlayer.Character
+        local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+        local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+        if not animator then return end
+        local animation = getFixParryAnimation()
+        if not animation then return end
+        for _, track in pairs(animator:GetPlayingAnimationTracks()) do
+            local name = track.Name
+            if name == "GrabParry" or name == "Grab" or name == "SuccessParry" or name == "Success" then
+                track:Stop(track:GetAttribute("StopFadeTime") or 0.1)
+            end
+        end
+        local grabTrack = animator:LoadAnimation(animation)
+        grabTrack:Play(
+            grabTrack:GetAttribute("PlayFadeTime") or 0,
+            grabTrack:GetAttribute("PlayWeight") or 1,
+            grabTrack:GetAttribute("PlaySpeed") or 1
+        )
+    end)
+end
+
+-- Load the sword API in the background, then keep the parry animation cache
+-- warm for the sword the player is currently holding.
+task.spawn(function()
+    pcall(function()
+        local shared = ReplicatedStorage:WaitForChild("Shared", 5)
+        if shared then fixSwordAPI = shared:WaitForChild("SwordAPI", 5) end
+    end)
+    while true do
+        pcall(prewarmFixAnimation)
+        task.wait(1)
+    end
+end)
+
 local function ParryFunction()
     local now = os.clock()
-    if now - lastParryFire < 0.02 then return false end
+    if now - lastParryFire < parryFireGap() then return false end
     lastParryFire = now
+    Parries = Parries + 1
+    task.delay(0.5, function() if Parries > 0 then Parries = Parries - 1 end end)
+    playParryFix()
     if _G.config.random_target and not CurrentTarget then pickRandomTarget() end
     local ok, fired = pcall(function()
         return _PARRY_PATCH.fire(getCurveCFrame(), collectScreenPositions(), currentMouseLocation())
@@ -2634,18 +2764,10 @@ local Debris = game:GetService('Debris')
 local ContextActionService = game:GetService('ContextActionService')
 local Phantom = false
 local Parried = false
-local Last_Parry = 0
-local Parries = 0
-local firstParryFired = false
-local firstParryType = 'F_Key'
-local Speed_Divisor_Multiplier = 1.1
 local LobbyAP_Speed_Divisor_Multiplier = 1.1
-local ParryThreshold = 2.5
-local Selected_Parry_Type = "Camera"
 local Infinity = false
 local Training_Parried = false
 local Grab_Parry = nil
-local Animation = {storage = {}, current = nil, track = nil}
 
 local function BlockMovement() return Enum.ContextActionResult.Sink end
 
@@ -2710,161 +2832,174 @@ local function spamDetectionRadius(speed)
     return math.clamp(pingMs / 10, 1, 16) + math.min(speed / 6, 95)
 end
 
-local function calcSpeedDivisorBase(speed)
-    return 2.2 + 0.9 * math.log(1 + speed / 80)
+-- ------------------------------------------------------------
+-- Ball approach maths (shared by Auto Parry, Auto Spam, Manual Spam)
+-- closing > 0 means the ball is flying towards us, timeToImpact is how long
+-- until it reaches us (math.huge when it is not closing in).
+-- ------------------------------------------------------------
+local function ballApproachInfo(ball, hrp)
+    if not ball or not hrp then return nil end
+    local zoomies = ball:FindFirstChild("zoomies")
+    if not zoomies then return nil end
+    local velocity = zoomies.VectorVelocity
+    local speed = velocity.Magnitude
+    local toMe = hrp.Position - ball.Position
+    local distance = toMe.Magnitude
+    if distance < 0.01 then distance = 0.01 end
+    local closing = velocity:Dot(toMe / distance)
+    local timeToImpact = math.huge
+    if speed > 0.01 and closing > 0.01 then
+        timeToImpact = distance / closing
+    end
+    return speed, distance, closing, timeToImpact
 end
 
-local SpeedDivisorMultiplier = 0.7 + (math.clamp(tonumber(getgenv().ParryAccuracy) or 100, 1, 100) - 1) * 0.0035353535353535
+local function parryPingSeconds()
+    return Stats.Network.ServerStatsItem["Data Ping"]:GetValue() / 1000
+end
 
-local parryActive = false
+-- Seconds before impact at which Auto Parry fires. Higher = parries earlier.
+local function parryReactionWindow(speed)
+    local window = tonumber(getgenv().AutoParryWindow) or 0.15
+    window = window + parryPingSeconds() * 1.2
+    if getgenv().ImproveAccuracy and getgenv().AITORT ~= false then
+        window = window + math.min((speed or 0) * 0.0004, 0.06)
+    end
+    if getgenv().RandomParryAccuracy then
+        window = window * (0.85 + math.random() * 0.3)
+    end
+    if getgenv().bypass_limits_Enabled then window = math.max(window, 5) end
+    return window
+end
+
+-- Detections shared by Auto Parry and Auto Spam. Returns true when a detection
+-- says "do not parry right now".
+local function parryBlockedByDetection(flags, character)
+    if flags.InfinityDetection and Det.Infinity_Active then return true end
+    if flags.DeathSlashDetection and Det.DeathSlash_Active then return true end
+    if flags.TimeHoleDetection and Det.TimeHole_Active then return true end
+    if flags.AutoTelekinesis and Det.Pull_Active then return true end
+    if flags.SlashOfFuryDetection and Det.Slashes_Active then return true end
+    if flags.ForcefieldDetection and Det.Forcefield_Active then return true end
+    if character and character.PrimaryPart and character.PrimaryPart:FindFirstChild("SingularityCape") then
+        return true
+    end
+    return false
+end
+
+local AutoParryLastFire = 0
 
 local function StartAutoParry()
     if Connections_Manager['Auto Parry'] then return end
     Connections_Manager['Auto Parry'] = RunService.PreSimulation:Connect(function()
         if _G.triggerbot then return end
         local character = LocalPlayer.Character
-        if not character or not character.PrimaryPart then return end
-
+        local hrp = character and character.PrimaryPart
+        if not hrp then return end
+        local flags = getgenv()
         local props = BallHelper.ball.properties
-        local realBall = BallHelper.get_ball()
-        local flags = getgenv()
 
+        -- Pick the incoming ball that will reach us first.
+        local bestBall, bestTTI, bestSpeed, bestDistance, bestClosing
         for _, ball in ipairs(BallHelper.get_balls()) do
-            if not ball then return end
-
-            local zoomies = ball:FindFirstChild("zoomies")
-            if not zoomies then return end
-
-            ball:GetAttributeChangedSignal("target"):Once(function()
-                parryActive = false
-            end)
-
-            if parryActive then return end
-
-            local ballTarget = ball:GetAttribute("target")
-            local realBallTarget = realBall and realBall:GetAttribute("target")
-            local velocity = zoomies.VectorVelocity
-            local distance = (character.PrimaryPart.Position - ball.Position).Magnitude
-            local pingMs = Stats.Network.ServerStatsItem["Data Ping"]:GetValue() / 10
-            local pingThreshold = math.clamp(pingMs / 8, 4, 25)
-            local rawSpeed = velocity.Magnitude
-            local speedDivisor = calcSpeedDivisorBase(rawSpeed) * SpeedDivisorMultiplier
-            local speedFactor = 1
-            if rawSpeed > 200 then
-                speedFactor = 1 + math.min((rawSpeed - 200) / 1000, 0.3)
-            end
-            local targetDistance = pingThreshold + math.max(rawSpeed / speedDivisor, 9.5) * speedFactor
-            if flags.ImproveAccuracy then
-                targetDistance = targetDistance + math.min(rawSpeed * 0.012, 12)
-            end
-            if flags.bypass_limits_Enabled then
-                targetDistance = math.max(targetDistance, 999)
-            end
-            local isCurving = BallHelper.ball_curved()
-
-            if ball:FindFirstChild("AeroDynamicSlashVFX") then
-                Debris:AddItem(ball.AeroDynamicSlashVFX, 0)
-                props.aerodynamic_time = tick()
-            end
-            if Runtime and Runtime:FindFirstChild("Tornado") then
-                local tornadoTime = Runtime.Tornado:GetAttribute("TornadoTime") or 1
-                if (tick() - props.aerodynamic_time) < tornadoTime + 0.314159 then return end
-            end
-
-            if realBallTarget == LocalPlayer.Name and isCurving then return end
-
-            if flags.InfinityDetection and Det.Infinity_Active then return end
-            if flags.DeathSlashDetection and Det.DeathSlash_Active then return end
-            if flags.TimeHoleDetection and Det.TimeHole_Active then return end
-            if flags.AutoTelekinesis and Det.Pull_Active then return end
-            if flags.SlashOfFuryDetection and Det.Slashes_Active then return end
-            if flags.ForcefieldDetection and Det.Forcefield_Active then return end
-            if character.PrimaryPart:FindFirstChild("SingularityCape") then return end
-
-            if ballTarget == LocalPlayer.Name and distance <= targetDistance then
-                if flags.PhantomV2Detection and Phantom and character:FindFirstChild("ParryHighlight") then
-                    ContextActionService:BindAction('BlockPlayerMovement', BlockMovement, false, Enum.KeyCode.W, Enum.KeyCode.A, Enum.KeyCode.S, Enum.KeyCode.D, Enum.UserInputType.Touch)
-                    if character.Humanoid then
-                        character.Humanoid.WalkSpeed = 36
-                        character.Humanoid:MoveTo(ball.Position)
-                        task.spawn(function()
-                            repeat
-                                if character.Humanoid and character.Humanoid.WalkSpeed ~= 36 then
-                                    character.Humanoid.WalkSpeed = 36
-                                end
-                                task.wait()
-                            until not Phantom
-                        end)
+            if ball:FindFirstChild("zoomies") then
+                local mine = ball:GetAttribute("target") == LocalPlayer.Name
+                local strayBlock = (not mine) and flags.AutoBlockSpams
+                if mine or strayBlock then
+                    local speed, distance, closing, tti = ballApproachInfo(ball, hrp)
+                    if speed and tti < (bestTTI or math.huge) then
+                        bestBall, bestTTI, bestSpeed, bestDistance, bestClosing = ball, tti, speed, distance, closing
                     end
-                    ball:GetAttributeChangedSignal('target'):Once(function()
-                        ContextActionService:UnbindAction('BlockPlayerMovement')
-                        Phantom = false
-                        if character.Humanoid then
-                            character.Humanoid:MoveTo(character.HumanoidRootPart.Position)
-                            character.Humanoid.WalkSpeed = 10
-                            task.delay(3, function()
-                                if character.Humanoid then character.Humanoid.WalkSpeed = 36 end
-                            end)
-                        end
-                    end)
                 end
-                if flags.CooldownProtection and cooldownProtection and cooldownProtection() then return end
-                if flags.AutoAbility and AutoAbility and AutoAbility() then return end
-                ParryFunction()
-                Parried = true
-                parryActive = true
             end
-
-            local startTime = tick()
-            repeat
-                RunService.PreSimulation:Wait()
-            until (tick() - startTime) >= 1 or not parryActive
-            parryActive = false
         end
-    end)
-end
+        if not bestBall then return end
 
-local function StartAutoSpam()
-    if Connections_Manager['Auto Spam'] then return end
-    local lastSpamFire = 0
-    Connections_Manager['Auto Spam'] = RunService.PreSimulation:Connect(function()
-        local flags = getgenv()
-        local ball = BallHelper.get_ball()
-        if not ball then return end
-        local zoomies = ball:FindFirstChild("zoomies")
-        if not zoomies then return end
-        local character = LocalPlayer.Character
-        if not character or not character.PrimaryPart then return end
-        local ballTarget = ball:GetAttribute("target")
-        if not ballTarget then return end
+        if parryBlockedByDetection(flags, character) then return end
 
-        local velocity = zoomies.VectorVelocity
-        local speed = velocity.Magnitude
-        if speed <= 0 then return end
-        local distance = (character.PrimaryPart.Position - ball.Position).Magnitude
-        local targetingMe = ballTargetsMe(ball)
+        -- Tornado / Aerodynamic Slash guard (ball spins, parry would be wasted).
+        if bestBall:FindFirstChild("AeroDynamicSlashVFX") then
+            Debris:AddItem(bestBall.AeroDynamicSlashVFX, 0)
+            props.aerodynamic_time = tick()
+        end
+        if Runtime and Runtime:FindFirstChild("Tornado") then
+            local tornadoTime = Runtime.Tornado:GetAttribute("TornadoTime") or 1
+            if (tick() - props.aerodynamic_time) < tornadoTime + 0.314159 then return end
+        end
 
-        if flags.SpamTargetOnly ~= false and not targetingMe then return end
+        local targetsMe = bestBall:GetAttribute("target") == LocalPlayer.Name
+        if not targetsMe then
+            -- Auto Block Spams: the ball is going to someone else, but it is
+            -- about to clip straight through us, so block it.
+            if not bestClosing or bestClosing <= 0.01 then return end
+            if (bestDistance or math.huge) > 20 then return end
+        else
+            local window = parryReactionWindow(bestSpeed)
+            if BallHelper.ball_curved() then window = window * 1.5 + 0.08 end
+            if bestTTI > window then return end
+        end
 
-        local maxAccuracy = spamDetectionRadius(speed) * (tonumber(ParryThreshold) or 1)
-        if distance > maxAccuracy then return end
+        local gap = 0.05
+        if flags.AntiBlockSpams then gap = 0.09 end
+        if os.clock() - AutoParryLastFire < gap then return end
+        AutoParryLastFire = os.clock()
 
-        if flags.InfinityDetection and Det.Infinity_Active then return end
-        if flags.DeathSlashDetection and Det.DeathSlash_Active then return end
-        if flags.TimeHoleDetection and Det.TimeHole_Active then return end
-        if flags.AutoTelekinesis and Det.Pull_Active then return end
-        if flags.SlashOfFuryDetection and Det.Slashes_Active then return end
-        if flags.ForcefieldDetection and Det.Forcefield_Active then return end
-        if character.PrimaryPart:FindFirstChild("SingularityCape") then return end
+        if flags.CooldownProtection and cooldownProtection and cooldownProtection() then return end
+        if flags.AutoAbility and AutoAbility and AutoAbility() then return end
 
-        local pingMs = Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
-        local fireDelay = math.max(pingMs / 1000, 0.01)
-        if os.clock() - lastSpamFire < fireDelay then return end
-        lastSpamFire = os.clock()
+        Parried = true
         ParryFunction()
     end)
 end
 
+local AutoSpamLastFire = 0
+
+local function StartAutoSpam()
+    if Connections_Manager['Auto Spam'] then return end
+    Connections_Manager['Auto Spam'] = RunService.PreSimulation:Connect(function()
+        local flags = getgenv()
+        local character = LocalPlayer.Character
+        local hrp = character and character.PrimaryPart
+        if not hrp then return end
+
+        local ball = BallHelper.get_ball()
+        if not ball then return end
+
+        local target = ball:GetAttribute("target")
+        if not target then return end
+        if target ~= LocalPlayer.Name and flags.SpamTargetOnly ~= false then return end
+
+        local speed, distance, closing, tti = ballApproachInfo(ball, hrp)
+        if not speed or speed <= 0 then return end
+        if distance > 300 then return end
+        -- The whole point: only spam while the ball is actually coming at us.
+        if not closing or closing <= 0.01 then return end
+        if character:GetAttribute("Pulsed") then return end
+
+        local pingSec = parryPingSeconds()
+        local kps = math.clamp(tonumber(flags.AutoSpamKPS) or 20, 1, 60)
+        -- Already parrying a lot (ball is bouncing on us)? Back off instead of
+        -- piling even more parries on top, which is what looked like "spam".
+        if Parries >= 6 then kps = math.min(kps, 12) end
+        if os.clock() - AutoSpamLastFire < math.max(1 / kps, pingSec) then return end
+
+        local window = tonumber(flags.AutoSpamWindow) or 0.35
+        window = window + pingSec
+        if flags.ImproveAutoSpam and flags.AITORT ~= false then window = window + 0.1 end
+        if BallHelper.ball_curved() then window = window * 1.4 end
+        if flags.bypass_limits_Enabled then window = math.max(window, 5) end
+        if tti > window then return end
+
+        if parryBlockedByDetection(flags, character) then return end
+
+        AutoSpamLastFire = os.clock()
+        ParryFunction()
+    end)
+end
+
+-- Manual Spam: the key/hold driven parry. Still gated on the ball being locked
+-- on us (or at least close and approaching) so holding the key cannot fire at
+-- an empty arena.
 local function StartManualSpam()
     if Connections_Manager['Manual Spam'] then return end
     getgenv().ManualSpamKey = getgenv().ManualSpamKey or Enum.KeyCode.E
@@ -2876,24 +3011,21 @@ local function StartManualSpam()
         local kps = math.clamp(tonumber(flags.ManualSpamKPS) or 25, 1, 100)
         if os.clock() - lastManualFire < 1 / kps then return end
 
+        local character = LocalPlayer.Character
+        local hrp = character and character.PrimaryPart
+        if not hrp then return end
+
         local ball = BallHelper.get_ball()
         if not ball then return end
 
         if flags.ManualSpamTargetOnly ~= false then
             if not ballTargetsMe(ball) then return end
-            local character = LocalPlayer.Character
-            local hrp = character and character.PrimaryPart
-            if not hrp then return end
             local limit = tonumber(flags.ManualSpamDistance) or 60
             if (hrp.Position - ball.Position).Magnitude > limit then return end
         elseif flags.ManualSpamNeedsBall ~= false then
-            local character = LocalPlayer.Character
-            local hrp = character and character.PrimaryPart
-            if not hrp then return end
-            local zoomies = ball:FindFirstChild("zoomies")
-            if not zoomies then return end
-            local speed = zoomies.VectorVelocity.Magnitude
-            if (hrp.Position - ball.Position).Magnitude > spamDetectionRadius(speed) then return end
+            local speed, distance = ballApproachInfo(ball, hrp)
+            if not speed then return end
+            if distance > spamDetectionRadius(speed) then return end
         end
 
         lastManualFire = os.clock()
@@ -3817,7 +3949,7 @@ MainTab.create_textbox({
 MainTab.create_dropdown({
     name = 'Custom Reward', flag = 'custom_reward', section = 'left', option = 'All',
     options = {'All', 'Daily', 'Tasks'},
-    callback = function(v) end
+    callback = function(v) reward_choice = v or 'All' end
 })
 
 MainTab.create_title({name = 'AI Options', section = 'right'})
@@ -3885,37 +4017,12 @@ CombatTab.create_toggle({
 
 CombatTab.create_toggle({
     name = 'Random Parry Accuracy', flag = 'random_parry_accuracy', section = 'left', enabled = false,
-    callback = function(v) getgenv().RandomParryAccuracyEnabled = v end
+    callback = function(v) getgenv().RandomParryAccuracy = v end
 })
 
 CombatTab.create_toggle({
     name = 'Animation Fix', flag = 'animation_fix', section = 'left', enabled = false,
-    callback = function(value)
-        if value then
-            Connections_Manager['Animation Fix'] = RunService.PreSimulation:Connect(function()
-                local Ball = nil
-                for _, b in ipairs(Balls:GetChildren()) do
-                    if b:GetAttribute("realBall") then Ball = b; break end
-                end
-                if not Ball then return end
-                local Zoomies = Ball:FindFirstChild('zoomies')
-                if not Zoomies then return end
-                local Ball_Target = Ball:GetAttribute('target')
-                if not Ball_Target then return end
-                local char = LocalPlayer.Character
-                if not char or not char.PrimaryPart then return end
-                local Distance = (char.PrimaryPart.Position - Ball.Position).Magnitude
-                local Speed = Zoomies.VectorVelocity.Magnitude
-                local Ping = game:GetService('Stats').Network.ServerStatsItem['Data Ping']:GetValue()
-                local spamAcc = math.clamp(Ping / 10, 10, 16) + math.min(Speed / 6, 95)
-                if Distance <= spamAcc and Parries > ParryThreshold then
-                    ParryFunction()
-                end
-            end)
-        else
-            if Connections_Manager['Animation Fix'] then Connections_Manager['Animation Fix']:Disconnect(); Connections_Manager['Animation Fix'] = nil end
-        end
-    end
+    callback = function(value) getgenv().AnimationFix = value end
 })
 
 CombatTab.create_line({section = "left"})
@@ -3934,18 +4041,19 @@ CombatTab.create_dropdown({
     callback = function(v) DirectionMode = v end
 })
 CombatTab.create_slider({
-    name = 'Parry Distance', flag = 'parry_distance', section = 'left',
-    value = 30, minimum_value = 30, maximum_value = 100,
-    callback = function(v)
-        Speed_Divisor_Multiplier = 0.7 + (v - 1) * (0.35 / 99)
-        SpeedDivisorMultiplier = 0.7 + (v - 1) * (0.35 / 99)
-        getgenv().ParryAccuracy = v
-    end
+    name = 'Parry Window', flag = 'parry_window', section = 'left',
+    value = 0.15, minimum_value = 0.05, maximum_value = 0.6,
+    callback = function(v) getgenv().AutoParryWindow = v end
 })
 CombatTab.create_slider({
-    name = 'Spam Radius x', flag = 'spam_power', section = 'left',
-    value = 1, minimum_value = 1, maximum_value = 3,
-    callback = function(v) ParryThreshold = v end
+    name = 'Auto Spam Window', flag = 'auto_spam_window', section = 'left',
+    value = 0.35, minimum_value = 0.1, maximum_value = 1,
+    callback = function(v) getgenv().AutoSpamWindow = v end
+})
+CombatTab.create_slider({
+    name = 'Auto Spam KPS', flag = 'auto_spam_kps', section = 'left',
+    value = 20, minimum_value = 5, maximum_value = 60,
+    callback = function(v) getgenv().AutoSpamKPS = v end
 })
 CombatTab.create_toggle({
     name = 'Spam Only When Targeted', flag = 'spam_target_only', section = 'left', enabled = true,
@@ -4066,15 +4174,34 @@ CombatTab.create_textbox({
 })
 
 CombatTab.create_title({name = 'AI Options', section = 'left'})
-CombatTab.create_toggle({name = 'AI TORT', flag = 'ai_tort', section = 'left', enabled = true, callback = function(state) end})
+CombatTab.create_toggle({name = 'AI TORT', flag = 'ai_tort', section = 'left', enabled = true, callback = function(state) getgenv().AITORT = state end})
 CombatTab.create_line({section = "left"})
 CombatTab.create_toggle({name = 'Improve Accuracy', flag = 'ai_auto_parry', section = 'left', enabled = true, callback = function(state) getgenv().ImproveAccuracy = state end})
-CombatTab.create_toggle({name = 'Improve Auto Spam', flag = 'ai_auto_spam', section = 'left', enabled = true, callback = function(state) end})
+CombatTab.create_toggle({name = 'Improve Auto Spam', flag = 'ai_auto_spam', section = 'left', enabled = true, callback = function(state) getgenv().ImproveAutoSpam = state end})
 
 CombatTab.create_title({name = 'Detections', section = 'left'})
+-- Master switch. It used to only set a local, so turning it off changed
+-- nothing; now it pushes the state into every individual detection flag.
+local DETECTION_FLAG_MAP = {
+    {'Toggle_InfinityDetection', 'InfinityDetection'},
+    {'Toggle_DeathSlashDetection', 'DeathSlashDetection'},
+    {'Toggle_TimeHoleDetection', 'TimeHoleDetection'},
+    {'Toggle_AutoTelekinesis', 'AutoTelekinesis'},
+    {'Toggle_Forcefield', 'ForcefieldDetection'},
+    {'Toggle_SlashOfFuryDetection', 'SlashOfFuryDetection'},
+    {'Toggle_AntiPhantom', 'PhantomV2Detection'},
+    {'Toggle_CooldownProtection', 'CooldownProtection'},
+    {'auto_ability', 'AutoAbility'},
+}
 CombatTab.create_toggle({
     name = 'Detections', flag = 'Toggle_Detections', section = 'left', enabled = true,
-    callback = function(state) Detections = state end
+    callback = function(state)
+        Detections = state
+        for _, entry in ipairs(DETECTION_FLAG_MAP) do
+            local wanted = Library.Flags[entry[1]]
+            getgenv()[entry[2]] = (state and wanted ~= false) and true or false
+        end
+    end
 })
 CombatTab.create_line({section = "left"})
 CombatTab.create_toggle({
@@ -4116,10 +4243,10 @@ CombatTab.create_toggle({
 
 CombatTab.create_title({name = 'Auto/Anti Options', section = 'right'})
 CombatTab.create_toggle({name = 'Auto Curve', flag = 'auto_curve', section = 'right', enabled = false, callback = function(state) EnableAutoCurve = state end})
-CombatTab.create_toggle({name = 'Auto Block Spams', flag = 'auto_block_spams', section = 'right', enabled = true, callback = function(state) end})
+CombatTab.create_toggle({name = 'Auto Block Spams', flag = 'auto_block_spams', section = 'right', enabled = true, callback = function(state) getgenv().AutoBlockSpams = state end})
 CombatTab.create_line({section = "right"})
 CombatTab.create_toggle({name = 'Anti Curve', flag = 'anti_curve', section = 'right', enabled = false, callback = function(state) EnableAntiCurve = state end})
-CombatTab.create_toggle({name = 'Anti Block Spams', flag = 'anti_block_spams', section = 'right', enabled = true, callback = function(state) end})
+CombatTab.create_toggle({name = 'Anti Block Spams', flag = 'anti_block_spams', section = 'right', enabled = true, callback = function(state) getgenv().AntiBlockSpams = state end})
 
 CombatTab.create_title({name = 'Auto Parry Lobby', section = 'right'})
 CombatTab.create_toggle({
