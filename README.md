@@ -2064,11 +2064,21 @@ end
 
 pcall(function()
     local replicatedStorage = game:GetService("ReplicatedStorage")
-    for _, remote in pairs(replicatedStorage:GetDescendants()) do
-        if remote:IsA('RemoteEvent') or remote:IsA('RemoteFunction') then _hook(remote) end
+    local descendants = replicatedStorage:GetDescendants()
+    if type(descendants) == "table" then
+        for _, remote in pairs(descendants) do
+            if remote and typeof(remote) == "Instance" then
+                if remote:IsA('RemoteEvent') or remote:IsA('RemoteFunction') then
+                    pcall(_hook, remote)
+                end
+            end
+        end
     end
     replicatedStorage.DescendantAdded:Connect(function(child)
-        if child:IsA('RemoteEvent') or child:IsA('RemoteFunction') then _hook(child) end
+        if not child or typeof(child) ~= "Instance" then return end
+        if child:IsA('RemoteEvent') or child:IsA('RemoteFunction') then
+            pcall(_hook, child)
+        end
     end)
 end)
 
@@ -2797,24 +2807,26 @@ end)
 getgenv().TORT_ParryKey = getgenv().TORT_ParryKey or Enum.KeyCode.F
 
 pcall(function()
-    if not getconnections then return end
-    local hotbar = LocalPlayer:FindFirstChild("PlayerGui")
-    hotbar = hotbar and hotbar:FindFirstChild("Hotbar")
-    local blockButton = hotbar and hotbar:FindFirstChild("Block")
+    if type(getconnections) ~= "function" then return end
+    local hotbar = LocalPlayer:WaitForChild("PlayerGui", 5)
+    hotbar = hotbar and hotbar:WaitForChild("Hotbar", 5)
+    if not hotbar then return end
+    local blockButton = hotbar:FindFirstChild("Block")
     if not blockButton then return end
-    local connections = getconnections(blockButton.Activated)
-    if not connections then return end
+    local okConn, connections = pcall(getconnections, blockButton.Activated)
+    if not okConn or type(connections) ~= "table" then return end
     for _, connection in pairs(connections) do
-        if connection and typeof(connection) == "table" and connection.Function and not iscclosure(connection.Function) then
+        if connection and typeof(connection) == "table" and connection.Function and type(iscclosure) == "function" and not iscclosure(connection.Function) then
             local okUpvalues, upvalues = pcall(getupvalues, connection.Function)
             if okUpvalues and type(upvalues) == "table" then
                 for _, value in pairs(upvalues) do
-                    if type(value) == "function" then
+                    if type(value) == "function" and type(getupvalue) == "function" then
                         local okKey, result = pcall(function()
                             return getupvalue(getupvalue(value, 2), 17)
                         end)
                         if okKey and typeof(result) == "EnumItem" then
                             getgenv().TORT_ParryKey = result
+                            break
                         end
                     end
                 end
