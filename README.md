@@ -3213,7 +3213,7 @@ function MobileSpam.create()
         if not getgenv().ManualSpamTargetOnly then
             local ball = BallHelper.get_ball()
             if not ballTargetsMe(ball) then
-                LibraryNotify:MakeNotify({Title = "TORT:", Description = "Hold Spam", Content = "Ball is not locked on you.", Time = 0.5, Delay = 3})
+                LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Hold Spam", Content = "Ball is not locked on you.", Time = 0.5, Delay = 3})
                 return
             end
         end
@@ -3247,7 +3247,7 @@ function MobileSpam.create()
         getgenv().ManualSpamActive = not getgenv().ManualSpamActive
         refreshManual()
         LibraryNotify:MakeNotify({
-            Title = "TORT:",
+            Title = "TORT FREE:",
             Description = "Manual Spam",
             Content = getgenv().ManualSpamActive and "Manual spam ON." or "Manual spam OFF.",
             Time = 0.5,
@@ -3905,12 +3905,12 @@ HomeTab.create_button({
         if not opened then
             if setclipboard then
                 setclipboard(JoinDiscord)
-                LibraryNotify:MakeNotify({Title = "TORT:", Description = "Clipboard", Content = "Link copied to your clipboard.", Time = 0.5, Delay = 5})
+                LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Clipboard", Content = "Link copied to your clipboard.", Time = 0.5, Delay = 5})
             else
-                LibraryNotify:MakeNotify({Title = "TORT:", Description = "UnSupport", Content = "Clipboard unsupported. Link: " .. JoinDiscord, Time = 0.5, Delay = 5})
+                LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "UnSupport", Content = "Clipboard unsupported. Link: " .. JoinDiscord, Time = 0.5, Delay = 5})
             end
         else
-            LibraryNotify:MakeNotify({Title = "TORT:", Description = "Discord PC", Content = "Discord is running on your device.", Time = 0.5, Delay = 15})
+            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Discord PC", Content = "Discord is running on your device.", Time = 0.5, Delay = 15})
         end
     end
 })
@@ -3924,16 +3924,16 @@ HomeTab.create_toggle({
                 local old
                 old = hookmetamethod(game, "__namecall", function(self, ...)
                     if string.lower(tostring(getnamecallmethod())) == "kick" then
-                        LibraryNotify:MakeNotify({Title = "TORT:", Description = "Protection", Content = "Blocked Kick attempt.", Time = 0.5, Delay = 5})
+                        LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Protection", Content = "Blocked Kick attempt.", Time = 0.5, Delay = 5})
                         return
                     end
                     return old(self, ...)
                 end)
                 getgenv().TORT_KickHook = old
             end
-            LibraryNotify:MakeNotify({Title = "TORT:", Description = "Protection", Content = "The Protections have been Activated.", Time = 0.5, Delay = 5})
+            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Protection", Content = "The Protections have been Activated.", Time = 0.5, Delay = 5})
         else
-            LibraryNotify:MakeNotify({Title = "TORT:", Description = "Protection", Content = "WARNING: Protection - TORT has been Disabled.", Time = 0.5, Delay = 5})
+            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Protection", Content = "WARNING: Protection - TORT FREE has been Disabled.", Time = 0.5, Delay = 5})
         end
     end
 })
@@ -4012,7 +4012,7 @@ MainTab.create_button({
                 end
             end
         end
-        LibraryNotify:MakeNotify({Title = "TORT:", Description = "VIP Tag", Content = "You have received the VIP badge.", Time = 0.5, Delay = 5})
+        LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "VIP Tag", Content = "You have received the VIP badge.", Time = 0.5, Delay = 5})
     end
 })
 
@@ -4110,16 +4110,16 @@ CombatTab.create_toggle({
                     if gameProcessed then return end
                     if input.KeyCode == getgenv().ManualSpamKey then
                         getgenv().ManualSpamActive = not getgenv().ManualSpamActive
-                        LibraryNotify:MakeNotify({Title = "TORT:", Description = "Manual Spam", Content = getgenv().ManualSpamActive and "Manual spam ON." or "Manual spam OFF.", Time = 0.5, Delay = 5})
+                        LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Manual Spam", Content = getgenv().ManualSpamActive and "Manual spam ON." or "Manual spam OFF.", Time = 0.5, Delay = 5})
                     end
                 end)
             end
-            LibraryNotify:MakeNotify({Title = "TORT:", Description = "Manual Spam", Content = "Manual spam activated. Press E to toggle.", Time = 0.5, Delay = 5})
+            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Manual Spam", Content = "Manual spam activated. Press E to toggle.", Time = 0.5, Delay = 5})
         else
             getgenv().ManualSpamActive = false
             if Connections_Manager['Manual Spam Key'] then Connections_Manager['Manual Spam Key']:Disconnect(); Connections_Manager['Manual Spam Key'] = nil end
             if Connections_Manager['Manual Spam'] then Connections_Manager['Manual Spam']:Disconnect(); Connections_Manager['Manual Spam'] = nil end
-            LibraryNotify:MakeNotify({Title = "TORT:", Description = "Manual Spam", Content = "Manual spam disabled.", Time = 0.5, Delay = 5})
+            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Manual Spam", Content = "Manual spam disabled.", Time = 0.5, Delay = 5})
         end
     end
 })
@@ -4347,7 +4347,7 @@ SettingsTab.create_button({
         for _, v in ipairs(Services.CoreGui:GetChildren()) do
             if v.Name == "TORTNotify" then v:Destroy() end
         end
-        LibraryNotify:MakeNotify({Title = "TORT:", Description = "Exit", Content = "Thank you for using TORT.", Time = 0.5, Delay = 5})
+        LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Exit", Content = "Thank you for using TORT.", Time = 0.5, Delay = 5})
     end
 })
 
@@ -4366,15 +4366,15 @@ SettingsTab.create_button({
     name = 'Submit Report', section = 'right',
     callback = function()
         if problemDescription == "" or problemDescription == "Describe your problem" then
-            LibraryNotify:MakeNotify({Title = "TORT:", Description = "Report Bugs", Content = "Please describe your problem.", Time = 0.5, Delay = 5})
+            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Report Bugs", Content = "Please describe your problem.", Time = 0.5, Delay = 5})
             return
         end
         if frequencySelection == "" then
-            LibraryNotify:MakeNotify({Title = "TORT:", Description = "Report Bugs", Content = "Please select how often the error occurs.", Time = 0.5, Delay = 5})
+            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Report Bugs", Content = "Please select how often the error occurs.", Time = 0.5, Delay = 5})
             return
         end
         reportCount = reportCount + 1
-        LibraryNotify:MakeNotify({Title = "TORT:", Description = "Report Bugs", Content = "Bug report submitted successfully.", Time = 0.5, Delay = 5})
+        LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Report Bugs", Content = "Bug report submitted successfully.", Time = 0.5, Delay = 5})
     end
 })
 
@@ -4388,11 +4388,11 @@ SettingsTab.create_button({
     name = 'Teleport Job ID', section = 'left',
     callback = function()
         if inputJobId ~= "" then
-            LibraryNotify:MakeNotify({Title = "TORT:", Description = "Job ID", Content = "Teleporting", Time = 0.5, Delay = 5})
+            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Job ID", Content = "Teleporting", Time = 0.5, Delay = 5})
             task.wait(0.5)
             TeleportService:TeleportToPlaceInstance(game.PlaceId, inputJobId, LocalPlayer)
         else
-            LibraryNotify:MakeNotify({Title = "TORT:", Description = "Job ID", Content = "Invalid Job ID.", Time = 0.5, Delay = 5})
+            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Job ID", Content = "Invalid Job ID.", Time = 0.5, Delay = 5})
         end
     end
 })
@@ -4400,7 +4400,7 @@ SettingsTab.create_button({
     name = 'Copy Job ID', section = 'left',
     callback = function()
         setclipboard(currentJobId)
-        LibraryNotify:MakeNotify({Title = "TORT:", Description = "Job ID", Content = "Job ID Copied to your clipboard.", Time = 0.5, Delay = 5})
+        LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Job ID", Content = "Job ID Copied to your clipboard.", Time = 0.5, Delay = 5})
     end
 })
 
@@ -4462,7 +4462,7 @@ SettingsTab.create_button({
             "TORTScripts", "TORT Script", "TORT Folder", "TORTFiles",
             "TORTClient", "TORTModule", "TORTInject", "TORTExecutor"
         } do pcall(delfolder, v) end
-        LibraryNotify:MakeNotify({Title = "TORT:", Description = "Settings", Content = "Settings have been success deleted.", Time = 0.5, Delay = 5})
+        LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Settings", Content = "Settings have been success deleted.", Time = 0.5, Delay = 5})
     end
 })
 
@@ -4515,7 +4515,7 @@ task.delay(2, function()
     LibraryNotify:MakeNotify({
         Title = "TORT FREE",
         Description = "Loaded",
-        Content = "TORT loaded successfully for Blade Ball. " .. (IsMobile and "Mobile" or "PC") .. " mode.",
+        Content = "TORT FREE loaded successfully for Blade Ball. " .. (IsMobile and "Mobile" or "PC") .. " mode.",
         Time = 0.5,
         Delay = 5
     })
