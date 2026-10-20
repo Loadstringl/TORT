@@ -2861,7 +2861,7 @@ end
 -- Seconds before impact at which Auto Parry fires. Higher = parries earlier.
 local function parryReactionWindow(speed)
     local window = tonumber(getgenv().AutoParryWindow) or 0.15
-    window = window + parryPingSeconds() * 1.2
+    window = window + parryPingSeconds() * 0.5
     if getgenv().ImproveAccuracy and getgenv().AITORT ~= false then
         window = window + math.min((speed or 0) * 0.0004, 0.06)
     end
@@ -2903,7 +2903,7 @@ local function StartAutoParry()
         local bestBall, bestTTI, bestSpeed, bestDistance, bestClosing
         for _, ball in ipairs(BallHelper.get_balls()) do
             if ball:FindFirstChild("zoomies") then
-                local mine = ball:GetAttribute("target") == LocalPlayer.Name
+                local mine = ballTargetsMe(ball)
                 local strayBlock = (not mine) and flags.AutoBlockSpams
                 if mine or strayBlock then
                     local speed, distance, closing, tti = ballApproachInfo(ball, hrp)
@@ -2927,12 +2927,15 @@ local function StartAutoParry()
             if (tick() - props.aerodynamic_time) < tornadoTime + 0.314159 then return end
         end
 
-        local targetsMe = bestBall:GetAttribute("target") == LocalPlayer.Name
+        local targetsMe = ballTargetsMe(bestBall)
         if not targetsMe then
             -- Auto Block Spams: the ball is going to someone else, but it is
-            -- about to clip straight through us, so block it.
+            -- about to clip straight through us, so block it. Only accept fast
+            -- balls that are genuinely about to hit us, so we stop "randomly"
+            -- swinging at balls that were never aimed at us.
             if not bestClosing or bestClosing <= 0.01 then return end
-            if (bestDistance or math.huge) > 20 then return end
+            if (bestDistance or math.huge) > 12 then return end
+            if (bestSpeed or 0) < 40 then return end
         else
             local window = parryReactionWindow(bestSpeed)
             if BallHelper.ball_curved() then window = window * 1.5 + 0.08 end
