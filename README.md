@@ -3917,23 +3917,30 @@ HomeTab.create_button({
 
 HomeTab.create_title({name = 'TORT Security', section = 'right'})
 HomeTab.create_toggle({
-    name = 'Protection - TORT', flag = 'auto_update', section = 'right', enabled = true,
+    name = 'Protection - TORT', flag = 'auto_update', section = 'right', enabled = false,
     callback = function(state)
         if state then
-            if hookmetamethod and getnamecallmethod and not getgenv().TORT_KickHook then
-                local old
-                old = hookmetamethod(game, "__namecall", function(self, ...)
-                    if string.lower(tostring(getnamecallmethod())) == "kick" then
-                        LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Protection", Content = "Blocked Kick attempt.", Time = 0.5, Delay = 5})
-                        return
-                    end
-                    return old(self, ...)
+            local hm, gnm = hookmetamethod, getnamecallmethod
+            if hm and gnm and not getgenv().TORT_KickHook then
+                local ok, old = pcall(function()
+                    local o
+                    o = hm(game, "__namecall", newcclosure(function(self, ...)
+                        local okNm, nm = pcall(gnm)
+                        if okNm and nm and string.lower(tostring(nm)) == "kick" then
+                            pcall(function()
+                                LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Protection", Content = "Blocked Kick attempt.", Time = 0.5, Delay = 5})
+                            end)
+                            return
+                        end
+                        return o(self, ...)
+                    end))
+                    return o
                 end)
-                getgenv().TORT_KickHook = old
+                if ok and old then getgenv().TORT_KickHook = old end
             end
-            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Protection", Content = "The Protections have been Activated.", Time = 0.5, Delay = 5})
+            pcall(function() LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Protection", Content = "The Protections have been Activated.", Time = 0.5, Delay = 5}) end)
         else
-            LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Protection", Content = "WARNING: Protection - TORT FREE has been Disabled.", Time = 0.5, Delay = 5})
+            pcall(function() LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Protection", Content = "WARNING: Protection - TORT FREE has been Disabled.", Time = 0.5, Delay = 5}) end)
         end
     end
 })
