@@ -1482,7 +1482,7 @@ end)()
 -- Compatibility shim: old ArgonRise API -> new argon2 API
 do
     function Library.__init()
-        local win = Library:CreateWindow({Title = "TORT", Theme = "Indigo", UseAccentColor = true})
+        local win = Library:CreateWindow({Title = "TORT FREE", Theme = "Indigo", UseAccentColor = true})
         local api = {}
         function api.create_tab(name)
             local tab = win:CreateTab(name)
@@ -2020,22 +2020,36 @@ local function _is_valid(args)
         and type(args[8]) == "boolean"
 end
 
+local _getRawMeta = getrawmetatable or (debug and debug.getmetatable)
+local _setReadonly = setreadonly
+local _isReadonly = isreadonly
+
 local _hook = function(remote)
     if _reverted[remote] then return end
-    local okMeta, meta = pcall(getrawmetatable, remote)
+    if type(_getRawMeta) ~= "function" then return end
+    local okMeta, meta = pcall(_getRawMeta, remote)
     if not okMeta or type(meta) ~= "table" then return end
     if _original[meta] then return end
     _original[meta] = true
-    local okReadonly, wasReadonly = pcall(isreadonly, meta)
-    wasReadonly = okReadonly and wasReadonly and true or false
-    if wasReadonly then pcall(setreadonly, meta, false) end
+    -- Guard: some executors expose a locked metatable and calling setreadonly
+    -- on it (or without support) throws hard and kills the client. Keep every
+    -- metatable operation pcalled, and bail out quietly if we cannot hook.
+    local wasReadonly = false
+    if type(_isReadonly) == "function" then
+        local okReadonly, ro = pcall(_isReadonly, meta)
+        wasReadonly = okReadonly and ro and true or false
+    end
+    if wasReadonly and type(_setReadonly) == "function" then
+        pcall(_setReadonly, meta, false)
+    end
     local _old = meta.__index
     meta.__index = function(self, key)
         if (key == 'FireServer' and self:IsA('RemoteEvent'))
         or (key == 'InvokeServer' and self:IsA('RemoteFunction')) then
             return function(_, ...)
                 local _arguments = {...}
-                if _is_valid(_arguments) and not _reverted[self] then
+                local okValid, valid = pcall(_is_valid, _arguments)
+                if okValid and valid and not _reverted[self] then
                     _reverted[self] = _arguments
                 end
                 return _old(self, key)(_, table.unpack(_arguments))
@@ -2043,7 +2057,9 @@ local _hook = function(remote)
         end
         return _old(self, key)
     end
-    if wasReadonly then pcall(setreadonly, meta, true) end
+    if wasReadonly and type(_setReadonly) == "function" then
+        pcall(_setReadonly, meta, true)
+    end
 end
 
 pcall(function()
@@ -4497,7 +4513,7 @@ workspace.Balls.ChildRemoved:Connect(function() Phantom = false end)
 -- ================================================================
 task.delay(2, function()
     LibraryNotify:MakeNotify({
-        Title = "TORT",
+        Title = "TORT FREE",
         Description = "Loaded",
         Content = "TORT loaded successfully for Blade Ball. " .. (IsMobile and "Mobile" or "PC") .. " mode.",
         Time = 0.5,
