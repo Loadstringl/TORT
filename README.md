@@ -2065,11 +2065,12 @@ end
 pcall(function()
     local replicatedStorage = game:GetService("ReplicatedStorage")
     local descendants = replicatedStorage:GetDescendants()
+    local hooked = 0
     if type(descendants) == "table" then
         for _, remote in pairs(descendants) do
             if remote and typeof(remote) == "Instance" then
                 if remote:IsA('RemoteEvent') or remote:IsA('RemoteFunction') then
-                    pcall(_hook, remote)
+                    if pcall(_hook, remote) then hooked = hooked + 1 end
                 end
             end
         end
@@ -2079,6 +2080,19 @@ pcall(function()
         if child:IsA('RemoteEvent') or child:IsA('RemoteFunction') then
             pcall(_hook, child)
         end
+    end)
+    task.delay(3, function()
+        pcall(function()
+            local count = 0
+            for _ in pairs(_reverted) do count = count + 1 end
+            if count > 0 then
+                LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Remote Hook", Content = "Hooked " .. count .. " remote(s).", Time = 0.5, Delay = 3})
+            elseif hooked > 0 or next(_reverted) then
+                LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Remote Hook", Content = "Parry hook initialized.", Time = 0.5, Delay = 3})
+            else
+                LibraryNotify:MakeNotify({Title = "TORT FREE:", Description = "Remote Hook", Content = "Using key/mouse fallback.", Time = 0.5, Delay = 3})
+            end
+        end)
     end)
 end)
 
@@ -2957,13 +2971,13 @@ local function StartAutoParry()
 
         local targetsMe = ballTargetsMe(bestBall)
         if not targetsMe then
+            if getgenv().AutoBlockSpams == false then return end
             -- Auto Block Spams: the ball is going to someone else, but it is
             -- about to clip straight through us, so block it. Only accept fast
-            -- balls that are genuinely about to hit us, so we stop "randomly"
-            -- swinging at balls that were never aimed at us.
+            -- balls that are genuinely about to hit us.
             if not bestClosing or bestClosing <= 0.01 then return end
-            if (bestDistance or math.huge) > 12 then return end
-            if (bestSpeed or 0) < 40 then return end
+            if (bestDistance or math.huge) > 10 then return end
+            if (bestSpeed or 0) < 60 then return end
         else
             local window = parryReactionWindow(bestSpeed)
             if BallHelper.ball_curved() then window = window * 1.5 + 0.08 end
@@ -3357,13 +3371,26 @@ Balls.ChildAdded:Connect(function(Value)
         if getgenv().SlashOfFuryDetection and Child.Name == 'ComboCounter' then
             local Sof_Label = Child:FindFirstChildOfClass('TextLabel')
             if Sof_Label then
-                repeat
-                    local Slashes_Counter = tonumber(Sof_Label.Text)
-                    if Slashes_Counter and Slashes_Counter < 32 then
-                        ParryFunction()
+                task.spawn(function()
+                    while Sof_Label.Parent do
+                        if getgenv().SlashOfFuryDetection then
+                            local Slashes_Counter = tonumber(Sof_Label.Text)
+                            if Slashes_Counter and Slashes_Counter < 32 then
+                                local ball = Value
+                                if ball and typeof(ballTargetsMe) == "function" and ballTargetsMe(ball) then
+                                    ParryFunction()
+                                    task.wait(math.max(parryFireGap(), 0.06))
+                                else
+                                    task.wait(0.12)
+                                end
+                            else
+                                task.wait()
+                            end
+                        else
+                            break
+                        end
                     end
-                    task.wait()
-                until not Sof_Label.Parent or not Sof_Label
+                end)
             end
         end
     end)
