@@ -2971,18 +2971,11 @@ local function StartAutoParry()
 
         local targetsMe = ballTargetsMe(bestBall)
         if not targetsMe then
-            if getgenv().AutoBlockSpams == false then return end
-            -- Auto Block Spams: the ball is going to someone else, but it is
-            -- about to clip straight through us, so block it. Only accept fast
-            -- balls that are genuinely about to hit us.
-            if not bestClosing or bestClosing <= 0.01 then return end
-            if (bestDistance or math.huge) > 10 then return end
-            if (bestSpeed or 0) < 60 then return end
-        else
-            local window = parryReactionWindow(bestSpeed)
-            if BallHelper.ball_curved() then window = window * 1.5 + 0.08 end
-            if bestTTI > window then return end
+            return
         end
+        local window = parryReactionWindow(bestSpeed)
+        if BallHelper.ball_curved() then window = window * 1.5 + 0.08 end
+        if bestTTI > window then return end
 
         local gap = 0.05
         if flags.AntiBlockSpams then gap = 0.09 end
@@ -4308,7 +4301,7 @@ CombatTab.create_toggle({
 
 CombatTab.create_title({name = 'Auto/Anti Options', section = 'right'})
 CombatTab.create_toggle({name = 'Auto Curve', flag = 'auto_curve', section = 'right', enabled = false, callback = function(state) EnableAutoCurve = state end})
-CombatTab.create_toggle({name = 'Auto Block Spams', flag = 'auto_block_spams', section = 'right', enabled = true, callback = function(state) getgenv().AutoBlockSpams = state end})
+CombatTab.create_toggle({name = 'Auto Block Spams', flag = 'auto_block_spams', section = 'right', enabled = false, callback = function(state) getgenv().AutoBlockSpams = state end})
 CombatTab.create_line({section = "right"})
 CombatTab.create_toggle({name = 'Anti Curve', flag = 'anti_curve', section = 'right', enabled = false, callback = function(state) EnableAntiCurve = state end})
 CombatTab.create_toggle({name = 'Anti Block Spams', flag = 'anti_block_spams', section = 'right', enabled = true, callback = function(state) getgenv().AntiBlockSpams = state end})
