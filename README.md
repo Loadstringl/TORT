@@ -2975,11 +2975,11 @@ local function StartAutoParry()
         end
         if (bestDistance or math.huge) > 160 then return end
         local window = parryReactionWindow(bestSpeed)
-        if BallHelper.ball_curved() then window = window * 1.25 end
+        if BallHelper.ball_curved() then window = window * 1.1 end
         if bestTTI > window then return end
 
-        local gap = 0.08
-        if flags.AntiBlockSpams then gap = 0.12 end
+        local gap = 0.1
+        if flags.AntiBlockSpams then gap = 0.14 end
         if os.clock() - AutoParryLastFire < gap then return end
         AutoParryLastFire = os.clock()
 
@@ -3016,17 +3016,19 @@ local function StartAutoSpam()
         if character:GetAttribute("Pulsed") then return end
 
         local pingSec = parryPingSeconds()
-        local kps = math.clamp(tonumber(flags.AutoSpamKPS) or 20, 1, 60)
+        local kps = math.clamp(tonumber(flags.AutoSpamKPS) or 12, 1, 60)
         -- Already parrying a lot (ball is bouncing on us)? Back off instead of
         -- piling even more parries on top, which is what looked like "spam".
-        if Parries >= 6 then kps = math.min(kps, 12) end
-        if os.clock() - AutoSpamLastFire < math.max(1 / kps, pingSec) then return end
+        if Parries >= 4 then kps = math.min(kps, 8) end
+        if Parries >= 6 then kps = math.min(kps, 6) end
+        if os.clock() - AutoSpamLastFire < math.max(1 / kps, pingSec + 0.01) then return end
 
-        local window = tonumber(flags.AutoSpamWindow) or 0.35
-        window = window + pingSec
-        if flags.ImproveAutoSpam and flags.AITORT ~= false then window = window + 0.1 end
-        if BallHelper.ball_curved() then window = window * 1.4 end
+        local window = tonumber(flags.AutoSpamWindow) or 0.25
+        window = window + pingSec * 0.6
+        if flags.ImproveAutoSpam and flags.AITORT ~= false then window = window + 0.05 end
+        if BallHelper.ball_curved() then window = window * 1.15 end
         if flags.bypass_limits_Enabled then window = math.max(window, 5) end
+        if (distance or math.huge) > 80 then return end
         if tti > window then return end
 
         if parryBlockedByDetection(flags, character) then return end
@@ -4067,7 +4069,7 @@ CombatTab.create_toggle({
 })
 
 CombatTab.create_toggle({
-    name = 'Auto Spam', flag = 'auto_spam', section = 'left', enabled = true,
+    name = 'Auto Spam', flag = 'auto_spam', section = 'left', enabled = false,
     callback = function(value)
         if value then StartAutoSpam()
         else if Connections_Manager['Auto Spam'] then Connections_Manager['Auto Spam']:Disconnect(); Connections_Manager['Auto Spam'] = nil end end
