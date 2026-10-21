@@ -2903,12 +2903,12 @@ end
 -- Seconds before impact at which Auto Parry fires. Higher = parries earlier.
 local function parryReactionWindow(speed)
     local window = tonumber(getgenv().AutoParryWindow) or 0.15
-    window = window + parryPingSeconds() * 0.5
+    window = window + parryPingSeconds() * 0.3
     if getgenv().ImproveAccuracy and getgenv().AITORT ~= false then
-        window = window + math.min((speed or 0) * 0.0004, 0.06)
+        window = window + math.min((speed or 0) * 0.00025, 0.04)
     end
     if getgenv().RandomParryAccuracy then
-        window = window * (0.85 + math.random() * 0.3)
+        window = window * (0.9 + math.random() * 0.15)
     end
     if getgenv().bypass_limits_Enabled then window = math.max(window, 5) end
     return window
@@ -2973,12 +2973,13 @@ local function StartAutoParry()
         if not targetsMe then
             return
         end
+        if (bestDistance or math.huge) > 160 then return end
         local window = parryReactionWindow(bestSpeed)
-        if BallHelper.ball_curved() then window = window * 1.5 + 0.08 end
+        if BallHelper.ball_curved() then window = window * 1.25 end
         if bestTTI > window then return end
 
-        local gap = 0.05
-        if flags.AntiBlockSpams then gap = 0.09 end
+        local gap = 0.08
+        if flags.AntiBlockSpams then gap = 0.12 end
         if os.clock() - AutoParryLastFire < gap then return end
         AutoParryLastFire = os.clock()
 
