@@ -1,5 +1,5 @@
 --[[
-    TORT — Blade Ball Edition (v5)
+    TORT FREE — Blade Ball Edition (v6)
     - Auto Parry, Spam, ESP, Visuals, AI, Rewards
     - Mobile + PC Support
     - Original: Argon Hub X / TORT by AgentX771
@@ -19,6 +19,22 @@
       Detections master switch and the Custom Reward dropdown.
     - Animation Fix now really replays the grab/parry animation (ported from
       Angeli) instead of a dead Parries counter that never incremented.
+
+    v6 changes (single unified parry engine)
+    - EVERY parry source now goes through one central gate (RequestParry):
+      Auto Parry, Auto Spam, Manual Spam, Lobby AP, Slash of Fury combo,
+      the SlashesOfFuryCatch loop, the Death Slash / Time Hole / Telekinesis
+      VFX pollers and the mobile PARRY / HOLD buttons. Before this, those
+      subsystems each called ParryFunction directly and could fire on the
+      same frame, which is what felt like "two parries" and "spam".
+    - The central gate enforces one shared cooldown (Parry Global Gap), a hard
+      70 stud distance cap for target-locked balls (and 12 studs + closing
+      speed for everything else), and the combat detection blocks. It is now
+      impossible for a far away ball to trigger a parry.
+    - Removed the old 120 stud "snap parry" in the VFX detection poller, which
+      was the main cause of parrying a ball that was still very far away.
+    - New Combat slider: Parry Global Gap. Defaults: Parry Window 0.12,
+      Auto Spam KPS 12.
 
     v4 changes (Auto / Manual Spam gating)
     - Auto Spam used to be dead code and Manual Spam fired at any ball on screen,
@@ -2586,8 +2602,10 @@ if DetNet then
         if caught then caught.OnClientEvent:Connect(function()
             task.spawn(function()
                 while Det.Slashes_Active and Det.Slashes_Count < 36 do
-                    ParryFunction()
-                    task.wait(0.05)
+                    if getgenv().SlashOfFuryDetection ~= false then
+                        RequestParry({skipDetection = true, reason = "fury"})
+                    end
+                    task.wait(0.06)
                 end
             end)
         end) end
@@ -2929,6 +2947,58 @@ local function parryBlockedByDetection(flags, character)
     return false
 end
 
+-- ============================================================
+-- CENTRAL PARRY GATE
+-- Every parry source (Auto Parry, Auto Spam, Manual Spam, Lobby AP,
+-- Slash of Fury, VFX detections, mobile buttons, fury catch) MUST call
+-- this instead of ParryFunction(). It is the one place that enforces:
+--   * a shared global cooldown (no two sources can double-fire)
+--   * the ball is actually locked on us (or about to hit us)
+--   * a hard distance cap so we never swing at a far away ball
+--   * combat detection blocks (unless the caller opts out)
+-- ============================================================
+local GLOBAL_PARRY_LAST = 0
+
+function RequestParry(opts)
+    opts = opts or {}
+    local now = os.clock()
+    local minGap = opts.gap or tonumber(getgenv().ParryGlobalGap) or 0.09
+    if now - GLOBAL_PARRY_LAST < minGap then return false end
+
+    local character = LocalPlayer.Character
+    local hrp = character and character.PrimaryPart
+
+    local ball = opts.ball
+    if not ball then
+        local okBall, got = pcall(function() return BallHelper.get_ball() end)
+        if okBall then ball = got end
+    end
+
+    if not opts.force then
+        if not hrp then return false end
+        if not opts.skipDetection and parryBlockedByDetection(getgenv(), character) then return false end
+        if not ball then return false end
+        local dist = (hrp.Position - ball.Position).Magnitude
+        if ballTargetsMe(ball) then
+            -- locked on us: still refuse to swing at a far away ball
+            if dist > 70 then return false end
+            -- and make sure it is actually heading towards us, not a ball
+            -- that already bounced away while still owning our target flag
+            local speed, distance, closing = ballApproachInfo(ball, hrp)
+            if closing and closing < -8 then return false end
+        else
+            -- not locked on us: only parry if it is basically on top of us
+            -- and physically flying towards us
+            if dist > 12 then return false end
+            local speed, distance, closing = ballApproachInfo(ball, hrp)
+            if not speed or not closing or closing <= 0.01 then return false end
+        end
+    end
+
+    GLOBAL_PARRY_LAST = now
+    return ParryFunction()
+end
+
 local AutoParryLastFire = 0
 
 local function StartAutoParry()
@@ -2987,7 +3057,7 @@ local function StartAutoParry()
         if flags.AutoAbility and AutoAbility and AutoAbility() then return end
 
         Parried = true
-        ParryFunction()
+        RequestParry({ball = bestBall, reason = "autoparry"})
     end)
 end
 
@@ -3034,7 +3104,7 @@ local function StartAutoSpam()
         if parryBlockedByDetection(flags, character) then return end
 
         AutoSpamLastFire = os.clock()
-        ParryFunction()
+        RequestParry({ball = ball, reason = "autospam"})
     end)
 end
 
@@ -3070,7 +3140,7 @@ local function StartManualSpam()
         end
 
         lastManualFire = os.clock()
-        ParryFunction()
+        RequestParry({ball = ball, reason = "manualspam"})
     end)
 end
 
@@ -3227,7 +3297,7 @@ function MobileSpam.create()
 
     parryButton.InputBegan:Connect(function(input)
         if not isTouch(input) then return end
-        ParryFunction()
+        RequestParry({force = true, reason = "mobile-parry"})
     end)
 
     holdButton.InputBegan:Connect(function(input)
@@ -3244,8 +3314,8 @@ function MobileSpam.create()
         task.spawn(function()
             local lastRelease = os.clock()
             while MobileSpam.holding do
-                ParryFunction()
-                task.wait(0.03)
+                RequestParry({reason = "mobile-hold"})
+                task.wait(0.05)
                 if os.clock() - lastRelease > 1.5 then
                     -- no touch updates for 1.5s: assume the finger was lifted
                     stopHolding()
@@ -3349,7 +3419,7 @@ local function StartLobbyAP()
                         local acc = Ping + math.max(Speed / (base * lobbyMultiplier), 9.5)
                         if getgenv().bypass_limits_Enabled then acc = math.max(acc, 999) end
                         if Distance <= acc then
-                            ParryFunction()
+                            RequestParry({ball = b, reason = "lobbyap"})
                             Training_Parried = true
                         end
                     end
@@ -3374,7 +3444,7 @@ Balls.ChildAdded:Connect(function(Value)
                             if Slashes_Counter and Slashes_Counter < 32 then
                                 local ball = Value
                                 if ball and typeof(ballTargetsMe) == "function" and ballTargetsMe(ball) then
-                                    ParryFunction()
+                                    RequestParry({ball = ball, reason = "sof"})
                                     task.wait(math.max(parryFireGap(), 0.06))
                                 else
                                     task.wait(0.12)
@@ -3429,10 +3499,7 @@ task.spawn(function()
                         end
                         if matched and hrp then
                             local ball = ballForParry()
-                            local closeEnough = ball and (ball.Position - hrp.Position).Magnitude <= 120
-                            if closeEnough or (ball and ball:GetAttribute("target") == tostring(LocalPlayer)) then
-                                ParryFunction()
-                            end
+                            RequestParry({ball = ball, skipDetection = true, reason = detection.Key})
                         end
                     end
                 end
@@ -4103,8 +4170,13 @@ CombatTab.create_dropdown({
 })
 CombatTab.create_slider({
     name = 'Parry Window', flag = 'parry_window', section = 'left',
-    value = 0.15, minimum_value = 0.05, maximum_value = 0.6,
+    value = 0.12, minimum_value = 0.05, maximum_value = 0.6,
     callback = function(v) getgenv().AutoParryWindow = v end
+})
+CombatTab.create_slider({
+    name = 'Parry Global Gap', flag = 'parry_global_gap', section = 'left',
+    value = 0.09, minimum_value = 0.05, maximum_value = 0.3,
+    callback = function(v) getgenv().ParryGlobalGap = v end
 })
 CombatTab.create_slider({
     name = 'Auto Spam Window', flag = 'auto_spam_window', section = 'left',
@@ -4113,7 +4185,7 @@ CombatTab.create_slider({
 })
 CombatTab.create_slider({
     name = 'Auto Spam KPS', flag = 'auto_spam_kps', section = 'left',
-    value = 20, minimum_value = 5, maximum_value = 60,
+    value = 12, minimum_value = 5, maximum_value = 60,
     callback = function(v) getgenv().AutoSpamKPS = v end
 })
 CombatTab.create_toggle({
