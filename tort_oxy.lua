@@ -7,6 +7,126 @@ do
         return
     end
 end
+-- ============================================================
+-- TORT loading animation
+-- ============================================================
+pcall(function()
+    local loadPlayers = game:GetService("Players")
+    local loadTween = game:GetService("TweenService")
+    local loadPlayer = loadPlayers.LocalPlayer
+    local playerGui = loadPlayer and loadPlayer:FindFirstChildOfClass("PlayerGui")
+    if not playerGui then return end
+    local oldGui = playerGui:FindFirstChild("TORT_Loading")
+    if oldGui then oldGui:Destroy() end
+
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "TORT_Loading"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.DisplayOrder = 100000
+    gui.Parent = playerGui
+
+    local bg = Instance.new("Frame")
+    bg.Size = UDim2.fromScale(1, 1)
+    bg.BackgroundColor3 = Color3.fromRGB(8, 9, 12)
+    bg.BorderSizePixel = 0
+    bg.Parent = gui
+
+    local card = Instance.new("Frame")
+    card.AnchorPoint = Vector2.new(0.5, 0.5)
+    card.Position = UDim2.fromScale(0.5, 0.5)
+    card.Size = UDim2.fromOffset(320, 150)
+    card.BackgroundTransparency = 1
+    card.Parent = bg
+
+    local title = Instance.new("TextLabel")
+    title.AnchorPoint = Vector2.new(0.5, 0.5)
+    title.Position = UDim2.fromScale(0.5, 0.34)
+    title.Size = UDim2.new(1, 0, 0, 54)
+    title.BackgroundTransparency = 1
+    title.Font = Enum.Font.GothamBold
+    title.Text = "TORT"
+    title.TextSize = 42
+    title.TextColor3 = Color3.fromRGB(167, 139, 250)
+    title.Parent = card
+
+    local titleGrad = Instance.new("UIGradient")
+    titleGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(139, 92, 246)),
+        ColorSequenceKeypoint.new(0.5, Color3.fromRGB(240, 236, 255)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(139, 92, 246)),
+    })
+    titleGrad.Offset = Vector2.new(-1, 0)
+    titleGrad.Parent = title
+    loadTween:Create(titleGrad, TweenInfo.new(1.2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Offset = Vector2.new(1, 0) }):Play()
+
+    local sub = Instance.new("TextLabel")
+    sub.AnchorPoint = Vector2.new(0.5, 0.5)
+    sub.Position = UDim2.fromScale(0.5, 0.58)
+    sub.Size = UDim2.new(1, 0, 0, 16)
+    sub.BackgroundTransparency = 1
+    sub.Font = Enum.Font.Gotham
+    sub.Text = "loading modules..."
+    sub.TextSize = 13
+    sub.TextColor3 = Color3.fromRGB(150, 150, 165)
+    sub.Parent = card
+
+    local dots = 0
+    task.spawn(function()
+        while gui.Parent do
+            dots = (dots + 1) % 4
+            sub.Text = "loading modules" .. string.rep(".", dots)
+            task.wait(0.35)
+        end
+    end)
+
+    local barBg = Instance.new("Frame")
+    barBg.AnchorPoint = Vector2.new(0.5, 0.5)
+    barBg.Position = UDim2.fromScale(0.5, 0.79)
+    barBg.Size = UDim2.fromOffset(240, 6)
+    barBg.BackgroundColor3 = Color3.fromRGB(30, 32, 42)
+    barBg.BorderSizePixel = 0
+    barBg.Parent = card
+    local barBgCorner = Instance.new("UICorner")
+    barBgCorner.CornerRadius = UDim.new(1, 0)
+    barBgCorner.Parent = barBg
+
+    local bar = Instance.new("Frame")
+    bar.Size = UDim2.fromScale(0, 1)
+    bar.BackgroundColor3 = Color3.fromRGB(139, 92, 246)
+    bar.BorderSizePixel = 0
+    bar.Parent = barBg
+    local barCorner = Instance.new("UICorner")
+    barCorner.CornerRadius = UDim.new(1, 0)
+    barCorner.Parent = bar
+
+    local barGrad = Instance.new("UIGradient")
+    barGrad.Color = ColorSequence.new(Color3.fromRGB(99, 102, 241), Color3.fromRGB(192, 132, 252))
+    barGrad.Parent = bar
+
+    local barTween = loadTween:Create(bar, TweenInfo.new(1.15, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut), { Size = UDim2.fromScale(1, 1) })
+    barTween:Play()
+
+    task.spawn(function()
+        local t0 = tick()
+        while gui.Parent and not getgenv().TORT_UI_READY do
+            if tick() - t0 > 8 then break end
+            task.wait(0.1)
+        end
+        pcall(function() barTween:Cancel() end)
+        loadTween:Create(bar, TweenInfo.new(0.2), { Size = UDim2.fromScale(1, 1) }):Play()
+        task.wait(0.15)
+        local info = TweenInfo.new(0.45, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+        loadTween:Create(bg, info, { BackgroundTransparency = 1 }):Play()
+        loadTween:Create(title, info, { TextTransparency = 1 }):Play()
+        loadTween:Create(sub, info, { TextTransparency = 1 }):Play()
+        loadTween:Create(barBg, info, { BackgroundTransparency = 1 }):Play()
+        loadTween:Create(bar, info, { BackgroundTransparency = 1 }):Play()
+        task.wait(0.5)
+        gui:Destroy()
+    end)
+end)
+
 -- Best-effort source reconstruction. See Reconstruction_Report.md.
 -- Constants were inferred; game-dependent features require runtime validation.
 local cloneref = cloneref or function(value) return value end
@@ -1020,10 +1140,16 @@ end)
 
 													if arg2._device == "Mobile" or arg2._device == "Unknown" then
 														arg2:get_screen_scale()
-														uiScale.Scale = arg2._ui_scale
+													end
 
+													local uiMult = tonumber(getgenv().TORTUIScale) or 1.2
+													arg2._ui_scale = (arg2._ui_scale or 1) * uiMult
+													uiScale.Scale = arg2._ui_scale
+
+													if arg2._device == "Mobile" or arg2._device == "Unknown" then
 														obj2.ui_scale = workspace.CurrentCamera:GetPropertyChangedSignal("ViewportSize"):Connect(function()
 															arg2:get_screen_scale()
+															arg2._ui_scale = arg2._ui_scale * uiMult
 															uiScale.Scale = arg2._ui_scale
 														end)
 													end
@@ -1031,6 +1157,7 @@ end)
 													TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(698, 479) }):Play()
 													index2.new(frame)
 													arg2._ui_loaded = true
+													getgenv().TORT_UI_READY = true
 
 													task.spawn(function()
 														local tbl26 = {}
@@ -5944,7 +6071,25 @@ local OxyParry = (function()
 		token_fn = nil,
 		last = 0,
 		count = 0,
+		attempts = 0,
+		misses = 0,
+		firstAttemptAt = 0,
+		broken = false,
 	}
+
+	-- Track server-confirmed parries. If replayed remotes stop producing
+	-- ParrySuccess, the replay is being rejected and we fall back to the
+	-- native F key so auto-parry never silently dies.
+	local lastSuccess = 0
+	pcall(function()
+		local remotes = RS:FindFirstChild("Remotes")
+		local successEvent = remotes and remotes:FindFirstChild("ParrySuccess")
+		if successEvent and successEvent:IsA("RemoteEvent") then
+			successEvent.OnClientEvent:Connect(function()
+				lastSuccess = os.clock()
+			end)
+		end
+	end)
 
 	pcall(function()
 		if type(getgc2) ~= "function" then return end
@@ -6111,8 +6256,26 @@ local OxyParry = (function()
 		end
 		if fired then
 			state.last = now
+			state.attempts = state.attempts + 1
+			if state.firstAttemptAt == 0 then
+				state.firstAttemptAt = now
+			end
 		end
 		return fired
+	end
+
+	-- The replayed remote is only trusted while the server keeps confirming
+	-- parries. After a few attempts with no ParrySuccess for 1.5s, assume the
+	-- replay is rejected and let ExecuteParry fall back to the F key.
+	function api.usable()
+		if state.broken then return false end
+		if state.attempts >= 3 then
+			local ref = math.max(lastSuccess, state.firstAttemptAt)
+			if os.clock() - ref > 1.5 then
+				state.broken = true
+			end
+		end
+		return not state.broken
 	end
 
 	pcall(function()
@@ -6133,31 +6296,33 @@ end)()
 
 do
 	local held = false
+	local heldAt = 0
 	local lastNative = 0
 	ExecuteParry = function(_mode)
-		if held or v88:GetFocusedTextBox() then return false end
+		if v88:GetFocusedTextBox() then return false end
+		if held and os.clock() - heldAt > 0.4 then held = false end
 		local character = localPlayer2.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if not humanoid or humanoid.Health <= 0 then return false end
 
-		-- Preferred path: replay the real parry remote (oxy capture).
-		if _mode ~= "Keypress" and OxyParry then
-			if OxyParry.ready() then
-				local okRemote, fired = pcall(OxyParry.fire)
-				if okRemote and fired then return true end
-				-- Remote is captured but this call was throttled/failed. Do NOT
-				-- fall back to the F key here or high-frequency spam loops would
-				-- hammer the key on every throttled tick.
+		-- Preferred path: replay the real parry remote (oxy capture) while the
+		-- server keeps confirming parries. If replays stop registering, `usable`
+		-- flips false and we permanently fall back to the F key below.
+		if _mode ~= "Keypress" and OxyParry and OxyParry.ready() and OxyParry.usable() then
+			local okRemote, fired = pcall(OxyParry.fire)
+			if okRemote and fired then return true end
+			if OxyParry.usable() then
+				-- Captured but throttled/failed this tick; don't hammer F.
 				return false
 			end
 		end
 
-		-- Fallback: native F key (only until the remote has been captured).
-		-- This first press is what lets the game fire its parry remote, which
-		-- the hook above captures for all following parries.
-		if os.clock() - lastNative < 0.05 then return false end
+		-- Native F key: used until the remote is captured, and as the permanent
+		-- fallback if replayed remotes are being rejected.
+		if held or os.clock() - lastNative < 0.05 then return false end
 		lastNative = os.clock()
 		held = true
+		heldAt = os.clock()
 		local ok, err = pcall(function()
 			virtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
 		end)
