@@ -6127,6 +6127,7 @@ end)()
 
 do
 	local held = false
+	local lastNative = 0
 	ExecuteParry = function(_mode)
 		if held or v88:GetFocusedTextBox() then return false end
 		local character = localPlayer2.Character
@@ -6135,12 +6136,21 @@ do
 
 		-- Preferred path: replay the real parry remote (oxy capture).
 		if _mode ~= "Keypress" and OxyParry then
-			local okRemote, fired = pcall(OxyParry.fire)
-			if okRemote and fired then return true end
+			if OxyParry.ready() then
+				local okRemote, fired = pcall(OxyParry.fire)
+				if okRemote and fired then return true end
+				-- Remote is captured but this call was throttled/failed. Do NOT
+				-- fall back to the F key here or high-frequency spam loops would
+				-- hammer the key on every throttled tick.
+				return false
+			end
 		end
 
-		-- Fallback: native F key. This also feeds the remote capture, so the
-		-- next parry can use the remote path.
+		-- Fallback: native F key (only until the remote has been captured).
+		-- This first press is what lets the game fire its parry remote, which
+		-- the hook above captures for all following parries.
+		if os.clock() - lastNative < 0.05 then return false end
+		lastNative = os.clock()
 		held = true
 		local ok, err = pcall(function()
 			virtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
