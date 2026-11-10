@@ -690,6 +690,13 @@ index._connections = obj2
 												instance5.TextSize = 15
 												instance5.BackgroundColor3 = Color3.fromRGB(235, 235, 245)
 												instance5.Parent = instance2
+												instance5.InputBegan:Connect(function(input)
+													if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+														arg._ui_open = not arg._ui_open
+														arg:change_visiblity(arg._ui_open)
+													end
+												end)
+
 												local uiGradient3 = Instance.new("UIGradient")
 												local colorSequence = ColorSequence.new
 												local tbl25 = {}
@@ -997,10 +1004,14 @@ end)
 												end
 
 												arg.change_visiblity = function(arg2, arg3)
+													local base = arg2._ui_scale or 1
 													if arg3 then
-														TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(698, 479) }):Play()
+														TweenService:Create(frame, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(698, 479) }):Play()
+														uiScale.Scale = base * 0.94
+														TweenService:Create(uiScale, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = base }):Play()
 													else
-														TweenService:Create(frame, TweenInfo.new(0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(104.5, 52) }):Play()
+														TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(104.5, 52) }):Play()
+														TweenService:Create(uiScale, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = base * 0.96 }):Play()
 													end
 												end
 
@@ -6077,8 +6088,7 @@ local OxyParry = (function()
 
 	function api.fire()
 		local now = os.clock()
-		if now - state.last < 0.05 then return false end
-		if state.count > 7 then return false end
+		if now - state.last < 0.045 then return false end
 		ensureHook()
 		if next(state.captured) == nil then return false end
 		if type(state.token_fn) ~= "function" then return false end
@@ -6101,10 +6111,6 @@ local OxyParry = (function()
 		end
 		if fired then
 			state.last = now
-			state.count = state.count + 1
-			task.delay(0.5, function()
-				if state.count > 0 then state.count = state.count - 1 end
-			end)
 		end
 		return fired
 	end
@@ -10083,70 +10089,65 @@ end
 
 									do
 										local function fn30()
+											if tbl20.Triggerbot then
+												tbl20.Triggerbot:Disconnect()
+												tbl20.Triggerbot = nil
+											end
+
+											local lastFire = 0
+
 											tbl20.Triggerbot = v85.PreSimulation:Connect(function()
-												local v90 = tbl21.Get_Balls()
+												if not getgenv().triggerbot_enabled then
+													return
+												end
 
-												for _, v91 in pairs(v90) do
-													if not v91 then
-														return
-													end
+												local character = localPlayer.Character
+												if not character or not character.PrimaryPart then
+													return
+												end
 
-													v91:GetAttributeChangedSignal("target"):Once(function()
-														flag18 = false
-													end)
+												if character.PrimaryPart:FindFirstChild("SingularityCape") then
+													return
+												end
 
-													if flag18 then
-														return
-													end
-													local attribute = v91:GetAttribute("target")
-													local character = localPlayer.Character
-													if not character or not character.PrimaryPart then
-														return
-													end
+												if getgenv().TriggerbotInfinityDetection and System.__state.infinity_active then
+													return
+												end
 
-													if character.PrimaryPart:FindFirstChild("SingularityCape") then
-														return
-													end
+												local now = tick()
+												if now - lastFire < 0.05 then
+													return
+												end
 
-													if getgenv().TriggerbotInfinityDetection and System.__state.infinity_active then
-														return
-													end
+												for _, ball in pairs(tbl21.Get_Balls()) do
+													if ball and ball:GetAttribute("target") == tostring(localPlayer) then
+														lastFire = now
+														local humanizer = getgenv().TriggerbotHumanizer or 0
 
-													if attribute == tostring(localPlayer) then
-														local triggerbotHumanizer = getgenv().TriggerbotHumanizer or 0
-														flag18 = true
-
-														task.delay(triggerbotHumanizer / 1000, function()
+														local function doParry()
 															if not getgenv().triggerbot_enabled then
 																return
 															end
-
 															if getgenv().TriggerbotKeypress then
 																mouse1click()
 															else
 																ExecuteParry(SelectedParryType)
 																tbl21.Play_Animation()
 															end
-														end)
-													end
+														end
 
-													local now2 = tick()
-
-													while true do
-														v85.PreSimulation:Wait()
-														local v92 = 1
-														if not (tick() - now2 >= v92 or not flag18) then
-															continue
+														if humanizer > 0 then
+															task.delay(humanizer / 1000, doParry)
+														else
+															doParry()
 														end
 														break
 													end
-
-													flag18 = false
 												end
 											end)
 										end
 
-										local function fn31()
+local function fn31()
 											if tbl20.Triggerbot then
 												tbl20.Triggerbot:Disconnect()
 												tbl20.Triggerbot = nil
