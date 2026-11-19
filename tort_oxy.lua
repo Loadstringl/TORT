@@ -6750,7 +6750,7 @@ local OxyParry = (function()
 
 	function api.fire()
 		local now = os.clock()
-		if now - state.last < 0.045 then return false end
+		if now - state.last < 0.03 then return false end
 		ensureHook()
 		if next(state.captured) == nil then return false end
 		if type(state.token_fn) ~= "function" then return false end
@@ -6786,7 +6786,7 @@ local OxyParry = (function()
 	local captureTimerStarted = false
 	function api.directFire()
 		local now = os.clock()
-		if now - state.last < 0.045 then return false end
+		if now - state.last < 0.03 then return false end
 		if not captureTimerStarted then
 			captureTimerStarted = true
 			task.delay(3, function()
@@ -6821,7 +6821,7 @@ do
 		if v88:GetFocusedTextBox() then return false end
 		local now = os.clock()
 		if isAuto then
-			if now - autoLast < 0.12 then return false end
+			if now - autoLast < 0.1 then return false end
 			autoLast = now
 		end
 		local character = localPlayer2.Character
@@ -6847,8 +6847,10 @@ end
 
 do
 	local lastAuto = 0
+	local lastAttemptAt = 0
 	local lastBall = nil
 	local lastTarget = nil
+	local attempts = 0
 	v85.PreSimulation:Connect(function()
 		if not System or not System.__properties or not System.__properties.__autoparry_enabled then
 			return
@@ -6861,16 +6863,19 @@ do
 			local stillThreat = lastBall.Parent ~= nil and lastBall:GetAttribute("target") == lastTarget
 			if stillThreat and tbl21.Ball_Position then
 				local lastPos = tbl21.Ball_Position(lastBall)
-				if lastPos and (hrp.Position - lastPos).Magnitude > 45 then stillThreat = false end
+				if lastPos and (hrp.Position - lastPos).Magnitude > 50 then stillThreat = false end
 			end
-			if not stillThreat then lastBall = nil end
+			if not stillThreat then
+				lastBall = nil
+				attempts = 0
+			end
 		end
 
 		local balls = tbl21 and tbl21.Get_Balls and tbl21.Get_Balls() or {}
 		for _, ball in pairs(balls) do
 			local target = ball and ball:GetAttribute("target")
 			local aimedAtUs = target == localPlayer2.Name
-			if ball ~= lastBall and (aimedAtUs or target == nil) then
+			if aimedAtUs or target == nil then
 				local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
 				if not pos and ball:IsA("BasePart") then pos = ball.Position end
 				if pos then
@@ -6883,15 +6888,23 @@ do
 					elseif ball:IsA("BasePart") then
 						velocity = ball.AssemblyLinearVelocity
 					end
+					local speed = 0
 					if velocity then
+						speed = velocity.Magnitude
 						local toPlayer = hrp.Position - pos
-						if velocity.Magnitude > 0 and toPlayer.Magnitude > 0 then
-							toward = velocity.Unit:Dot(toPlayer.Unit) > 0.2
+						if speed > 0 and toPlayer.Magnitude > 0 then
+							toward = velocity.Unit:Dot(toPlayer.Unit) > (aimedAtUs and -0.2 or 0.35)
 						end
 					end
-					local reach = aimedAtUs and 42 or 20
-					if dist <= reach and (toward or dist <= 14) and os.clock() - lastAuto >= 0.1 then
+					local impact = speed > 1 and (dist / speed) or 99
+					local reach = aimedAtUs and 46 or 22
+					local sameBall = ball == lastBall
+					local canRetry = sameBall and attempts < 3 and os.clock() - lastAttemptAt >= 0.14
+					if (not sameBall or canRetry) and os.clock() - lastAuto >= 0.08
+						and (dist <= reach or impact <= 0.18) and (toward or dist <= 16) then
+						attempts = sameBall and (attempts + 1) or 1
 						lastAuto = os.clock()
+						lastAttemptAt = lastAuto
 						lastBall = ball
 						lastTarget = target
 						pcall(ExecuteParry, SelectedParryType)
