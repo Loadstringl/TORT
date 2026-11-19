@@ -52,6 +52,9 @@ pcall(function()
     card.Size = UDim2.fromOffset(320, 150)
     card.BackgroundTransparency = 1
     card.Parent = bg
+    card.Size = UDim2.fromOffset(200, 100)
+    card.Rotation = -6
+    loadTween:Create(card, TweenInfo.new(0.7, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(320, 150), Rotation = 0 }):Play()
 
     local title = Instance.new("TextLabel")
     title.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -73,6 +76,41 @@ pcall(function()
     titleGrad.Offset = Vector2.new(-1, 0)
     titleGrad.Parent = title
     loadTween:Create(titleGrad, TweenInfo.new(1.2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1), { Offset = Vector2.new(1, 0) }):Play()
+
+    local loadGlyphs = "ABCDEF0123456789<>/|_#"
+    task.spawn(function()
+        for step = 1, 12 do
+            if not title.Parent then break end
+            local reveal = math.floor(4 * step / 12)
+            local out = {}
+            for k = 1, 4 do
+                local ch = ("TORT"):sub(k, k)
+                if k <= reveal then
+                    out[k] = ch
+                else
+                    local r = math.random(1, #loadGlyphs)
+                    out[k] = loadGlyphs:sub(r, r)
+                end
+            end
+            title.Text = table.concat(out)
+            task.wait(0.04)
+        end
+        if title.Parent then title.Text = "TORT" end
+    end)
+
+    local loadSweep = Instance.new("Frame")
+    loadSweep.Size = UDim2.fromOffset(0, 150)
+    loadSweep.BackgroundColor3 = Color3.fromRGB(190, 155, 255)
+    loadSweep.BackgroundTransparency = 0.55
+    loadSweep.BorderSizePixel = 0
+    loadSweep.Parent = card
+    task.spawn(function()
+        while card.Parent do
+            loadSweep.Position = UDim2.fromOffset(-20, 0)
+            loadTween:Create(loadSweep, TweenInfo.new(1.2, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), { Position = UDim2.fromOffset(320, 0) }):Play()
+            task.wait(1.3)
+        end
+    end)
 
     local sub = Instance.new("TextLabel")
     sub.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -890,6 +928,50 @@ index._connections = obj2
 													end
 												end)
 
+												local stripeGradFrame = Instance.new("Frame")
+												stripeGradFrame.Size = UDim2.fromScale(1, 1)
+												stripeGradFrame.BackgroundTransparency = 1
+												stripeGradFrame.BorderSizePixel = 0
+												stripeGradFrame.ZIndex = 0
+												stripeGradFrame.Parent = bgFx
+												local stripeGrad = Instance.new("UIGradient")
+												local stripePoints = {}
+												for stripeIndex = 0, 16 do
+													local alpha = (stripeIndex % 2 == 0) and 0.82 or 0.96
+													stripePoints[#stripePoints + 1] = NumberSequenceKeypoint.new(stripeIndex / 16, alpha)
+												end
+												stripeGrad.Transparency = NumberSequence.new(stripePoints)
+												stripeGrad.Color = ColorSequence.new(Color3.fromRGB(190, 155, 255), Color3.fromRGB(120, 190, 255))
+												stripeGrad.Rotation = 35
+												stripeGrad.Parent = stripeGradFrame
+												task.spawn(function()
+													while stripeGrad.Parent do
+														stripeGrad.Offset = Vector2.new(-1, 0)
+														TweenService:Create(stripeGrad, TweenInfo.new(5, Enum.EasingStyle.Linear), { Offset = Vector2.new(1, 0) }):Play()
+														task.wait(5)
+													end
+												end)
+
+												local glowFx = Instance.new("Frame")
+												glowFx.Size = UDim2.fromScale(1, 1)
+												glowFx.BackgroundColor3 = Color3.fromRGB(150, 90, 255)
+												glowFx.BackgroundTransparency = 0.96
+												glowFx.BorderSizePixel = 0
+												glowFx.ZIndex = 0
+												glowFx.Parent = bgFx
+												local glowGrad = Instance.new("UIGradient")
+												glowGrad.Color = ColorSequence.new(Color3.fromRGB(139, 92, 246), Color3.fromRGB(236, 72, 153))
+												glowGrad.Transparency = NumberSequence.new(0.88)
+												glowGrad.Parent = glowFx
+												task.spawn(function()
+													while glowFx.Parent do
+														TweenService:Create(glowFx, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { BackgroundTransparency = 0.84 }):Play()
+														task.wait(1.6)
+														TweenService:Create(glowFx, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { BackgroundTransparency = 0.96 }):Play()
+														task.wait(1.6)
+													end
+												end)
+
 												local perfLabel = Instance.new("TextLabel")
 												perfLabel.Size = UDim2.fromOffset(170, 22)
 												perfLabel.Position = UDim2.fromOffset(520, 6)
@@ -903,7 +985,7 @@ index._connections = obj2
 												perfLabel.Parent = instance2
 												local perfFrames = 0
 												local perfLast = os.clock()
-												v85.RenderStepped:Connect(function()
+												game:GetService("RunService").RenderStepped:Connect(function()
 													perfFrames = perfFrames + 1
 													local nowPerf = os.clock()
 													if nowPerf - perfLast >= 1 then
@@ -1282,11 +1364,14 @@ end)
 												arg.change_visiblity = function(arg2, arg3)
 													local base = arg2._ui_scale or 1
 													if arg3 then
-														TweenService:Create(frame, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(698, 479) }):Play()
-														uiScale.Scale = base * 0.94
+														frame.Rotation = -4
+														TweenService:Create(frame, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(698, 479), Rotation = 0 }):Play()
+														uiScale.Scale = base * 0.9
 														TweenService:Create(uiScale, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out), { Scale = base }):Play()
+														bgFx.BackgroundTransparency = 0.35
+														TweenService:Create(bgFx, TweenInfo.new(0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { BackgroundTransparency = 0 }):Play()
 													else
-														TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(104.5, 52) }):Play()
+														TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(104.5, 52), Rotation = 0 }):Play()
 														TweenService:Create(uiScale, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = base * 0.96 }):Play()
 													end
 												end
