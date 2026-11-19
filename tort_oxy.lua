@@ -6750,7 +6750,7 @@ local OxyParry = (function()
 
 	function api.fire()
 		local now = os.clock()
-		if now - state.last < 0.03 then return false end
+		if now - state.last < 0.001 then return false end
 		ensureHook()
 		if next(state.captured) == nil then return false end
 		if type(state.token_fn) ~= "function" then return false end
@@ -6786,7 +6786,7 @@ local OxyParry = (function()
 	local captureTimerStarted = false
 	function api.directFire()
 		local now = os.clock()
-		if now - state.last < 0.03 then return false end
+		if now - state.last < 0.001 then return false end
 		if not captureTimerStarted then
 			captureTimerStarted = true
 			task.delay(3, function()
@@ -6847,10 +6847,8 @@ end
 
 do
 	local lastAuto = 0
-	local lastAttemptAt = 0
 	local lastBall = nil
 	local lastTarget = nil
-	local attempts = 0
 	v85.PreSimulation:Connect(function()
 		if not System or not System.__properties or not System.__properties.__autoparry_enabled then
 			return
@@ -6865,17 +6863,14 @@ do
 				local lastPos = tbl21.Ball_Position(lastBall)
 				if lastPos and (hrp.Position - lastPos).Magnitude > 50 then stillThreat = false end
 			end
-			if not stillThreat then
-				lastBall = nil
-				attempts = 0
-			end
+			if not stillThreat then lastBall = nil end
 		end
 
 		local balls = tbl21 and tbl21.Get_Balls and tbl21.Get_Balls() or {}
 		for _, ball in pairs(balls) do
 			local target = ball and ball:GetAttribute("target")
 			local aimedAtUs = target == localPlayer2.Name
-			if aimedAtUs or target == nil then
+			if ball ~= lastBall and (aimedAtUs or target == nil) then
 				local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
 				if not pos and ball:IsA("BasePart") then pos = ball.Position end
 				if pos then
@@ -6898,13 +6893,9 @@ do
 					end
 					local impact = speed > 1 and (dist / speed) or 99
 					local reach = aimedAtUs and 46 or 22
-					local sameBall = ball == lastBall
-					local canRetry = sameBall and attempts < 3 and os.clock() - lastAttemptAt >= 0.14
-					if (not sameBall or canRetry) and os.clock() - lastAuto >= 0.08
-						and (dist <= reach or impact <= 0.18) and (toward or dist <= 16) then
-						attempts = sameBall and (attempts + 1) or 1
+					if (dist <= reach or impact <= 0.18) and (toward or dist <= 16)
+						and os.clock() - lastAuto >= 0.08 then
 						lastAuto = os.clock()
-						lastAttemptAt = lastAuto
 						lastBall = ball
 						lastTarget = target
 						pcall(ExecuteParry, SelectedParryType)
@@ -6913,6 +6904,34 @@ do
 				end
 			end
 		end
+	end)
+
+	pcall(function()
+		local remotes = RS:FindFirstChild("Remotes")
+		local successAll = remotes and remotes:FindFirstChild("ParrySuccessAll")
+		if not successAll then return end
+		successAll.OnClientEvent:Connect(function(_, source)
+			if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
+			if source and source.Parent and source.Parent ~= lp2.Character and source.Parent.Parent ~= workspace:FindFirstChild("Alive") then return end
+			local ch = lp2.Character
+			local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+			if not hrp then return end
+			local ball = tbl21 and tbl21.Get_Ball and tbl21.Get_Ball()
+			if not ball then return end
+			local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
+			if not pos and ball:IsA("BasePart") then pos = ball.Position end
+			if not pos then return end
+			local zoomies = ball:FindFirstChild("zoomies")
+			local velocity = zoomies and zoomies.VectorVelocity or (ball:IsA("BasePart") and ball.AssemblyLinearVelocity)
+			if not velocity then return end
+			local fromBall = hrp.Position - pos
+			local dist = fromBall.Magnitude
+			local dot = fromBall.Magnitude > 0 and velocity.Unit:Dot(fromBall.Unit) or 0
+			if dist <= 18 and dot > -0.25 and os.clock() - lastAuto >= 0.04 then
+				lastAuto = os.clock()
+				pcall(ExecuteParry, SelectedParryType)
+			end
+		end)
 	end)
 end
 
