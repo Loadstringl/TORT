@@ -14,7 +14,7 @@ pcall(function()
     local loadPlayers = game:GetService("Players")
     local loadTween = game:GetService("TweenService")
     local loadPlayer = loadPlayers.LocalPlayer
-    local playerGui = loadPlayer and loadPlayer:FindFirstChildOfClass("PlayerGui")
+    local playerGui = loadPlayer and loadPlayer:WaitForChild("PlayerGui", 5)
     if not playerGui then return end
     local oldGui = playerGui:FindFirstChild("TORT_Loading")
     if oldGui then oldGui:Destroy() end
@@ -1142,7 +1142,7 @@ end)
 														arg2:get_screen_scale()
 													end
 
-													local uiMult = tonumber(getgenv().TORTUIScale) or 1.2
+													local uiMult = tonumber(getgenv().TORTUIScale) or 1.35
 													arg2._ui_scale = (arg2._ui_scale or 1) * uiMult
 													uiScale.Scale = arg2._ui_scale
 
@@ -6202,23 +6202,58 @@ local OxyParry = (function()
 	local function buildArgs()
 		local cam = Workspace2.CurrentCamera
 		if not cam then return nil end
-		local curve = cam.CFrame
+		local cf = cam.CFrame
+		local vs = cam.ViewportSize
+		local myChar = lp2.Character
+		local hrp = myChar and myChar:FindFirstChild("HumanoidRootPart")
+		local al = Workspace2:FindFirstChild("Alive")
+		local targetChar = nil
+
+		if al then
+			local best = -math.huge
+			local centerDir = cam:ViewportPointToRay(vs.X * 0.5, vs.Y * 0.5).Direction
+			local look = cf.LookVector
+			for _, ch in ipairs(al:GetChildren()) do
+				if ch ~= myChar and ch.PrimaryPart then
+					local rel = ch.PrimaryPart.Position - cf.Position
+					if rel.Magnitude > 0 and look:Dot(rel.Unit) > 0 then
+						local score = centerDir:Dot(rel.Unit)
+						if score > best then
+							best = score
+							targetChar = ch
+						end
+					end
+				end
+			end
+			if not targetChar then
+				for _, ch in ipairs(al:GetChildren()) do
+					if ch ~= myChar and ch.PrimaryPart then
+						targetChar = ch
+						break
+					end
+				end
+			end
+		end
+
+		local aimPos = (targetChar and targetChar.PrimaryPart and targetChar.PrimaryPart.Position)
+			or (hrp and (hrp.Position + cf.LookVector * 100))
+			or (cf.Position + cf.LookVector * 100)
+		local curve = cf
+		local pt, vis = cam:WorldToScreenPoint(aimPos)
 		local coords
-		if not UIS2.TouchEnabled then
-			local ml = UIS2:GetMouseLocation()
-			coords = { ml.X, ml.Y }
+		if vis or pt.Z > 0 then
+			coords = { pt.X, pt.Y }
 		else
-			local vs = cam.ViewportSize
 			coords = { vs.X * 0.5, vs.Y * 0.5 }
 		end
+
 		local targets = {}
-		local al = Workspace2:FindFirstChild("Alive")
 		if al then
 			for _, ch in ipairs(al:GetChildren()) do
 				local pp = ch.PrimaryPart
 				if pp then
-					local pt, vis = cam:WorldToScreenPoint(pp.Position)
-					if vis or pt.Z > 0 then targets[ch.Name] = pt end
+					local sp, sv = cam:WorldToScreenPoint(pp.Position)
+					if sv or sp.Z > 0 then targets[ch.Name] = sp end
 				end
 			end
 		end
@@ -6239,6 +6274,18 @@ local OxyParry = (function()
 		if type(state.token_fn) ~= "function" then return false end
 		local curve, targets, coords = buildArgs()
 		if not curve then return false end
+		pcall(function()
+			local ch = lp2.Character
+			if ch then
+				local current = ch:GetAttribute("ParryTime") or 0
+				ch:SetAttribute("ParryTime", math.max(current, 0.5))
+			end
+		end)
+		pcall(function()
+			if tbl21 and type(tbl21.Play_Animation) == "function" then
+				tbl21.Play_Animation()
+			end
+		end)
 		local fired = false
 		for remote, captured in pairs(state.captured) do
 			local seed = captured[2]
@@ -6268,14 +6315,7 @@ local OxyParry = (function()
 	-- parries. After a few attempts with no ParrySuccess for 1.5s, assume the
 	-- replay is rejected and let ExecuteParry fall back to the F key.
 	function api.usable()
-		if state.broken then return false end
-		if state.attempts >= 3 then
-			local ref = math.max(lastSuccess, state.firstAttemptAt)
-			if os.clock() - ref > 1.5 then
-				state.broken = true
-			end
-		end
-		return not state.broken
+		return true
 	end
 
 	pcall(function()
@@ -6305,20 +6345,15 @@ do
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if not humanoid or humanoid.Health <= 0 then return false end
 
-		-- Preferred path: replay the real parry remote (oxy capture) while the
-		-- server keeps confirming parries. If replays stop registering, `usable`
-		-- flips false and we permanently fall back to the F key below.
-		if _mode ~= "Keypress" and OxyParry and OxyParry.ready() and OxyParry.usable() then
+		-- Preferred path: always replay the real parry remote once captured.
+		-- No mouse/keypress is involved in any parry after the initial capture.
+		if OxyParry and OxyParry.ready() then
 			local okRemote, fired = pcall(OxyParry.fire)
 			if okRemote and fired then return true end
-			if OxyParry.usable() then
-				-- Captured but throttled/failed this tick; don't hammer F.
-				return false
-			end
+			return false
 		end
 
-		-- Native F key: used until the remote is captured, and as the permanent
-		-- fallback if replayed remotes are being rejected.
+		-- Native F key: only used until the remote has been captured once.
 		if held or os.clock() - lastNative < 0.05 then return false end
 		lastNative = os.clock()
 		held = true
