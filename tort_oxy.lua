@@ -1,3 +1,9 @@
+getgenv().AutoParryMode = getgenv().AutoParryMode or "Distance"
+getgenv().AutoSpamMode = getgenv().AutoSpamMode or "Remote"
+getgenv().ManualSpamMode = getgenv().ManualSpamMode or "Remote"
+getgenv().TriggerbotKeypress = false
+getgenv().TORT_UI_READY = false
+
 -- Reuse a completed session instead of installing duplicate hooks/connections.
 do
     local session = getgenv().TORTRecoveredSession
@@ -6374,6 +6380,32 @@ do
 	end
 end
 
+do
+	local lastAuto = 0
+	v85.PreSimulation:Connect(function()
+		if not System or not System.__properties or not System.__properties.__autoparry_enabled then
+			return
+		end
+		local ch = localPlayer2.Character
+		local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+		if not hrp then return end
+		local balls = tbl21 and tbl21.Get_Balls and tbl21.Get_Balls() or {}
+		for _, ball in pairs(balls) do
+			if ball and ball:GetAttribute("target") == localPlayer2.Name then
+				local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
+				if pos then
+					local dist = (hrp.Position - pos).Magnitude
+					if dist <= 55 and os.clock() - lastAuto >= 0.08 then
+						lastAuto = os.clock()
+						pcall(ExecuteParry, SelectedParryType)
+						break
+					end
+				end
+			end
+		end
+	end)
+end
+
 								v87.Remotes.InfinityBall.OnClientEvent:Connect(function(arg, infinityActive)
 									System.__state.infinity_active = infinityActive or false
 								end)
@@ -9759,13 +9791,8 @@ end
 															end
 
 															if v96 <= v93 and n33 > System.__properties.__spam_threshold then
-																if getgenv().AutoSpamMode == "Keypress" then
-																	virtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
-																	virtualInputManager:SendKeyEvent(false, Enum.KeyCode.F, false, game)
-																else
-																	ExecuteParry(SelectedParryType)
-																	tbl21.Play_Animation()
-																end
+																ExecuteParry(SelectedParryType)
+																tbl21.Play_Animation()
 															end
 
 															return
@@ -9848,16 +9875,8 @@ end
 															return
 														end
 
-														if getgenv().ManualSpamMode == "Keypress" then
-															virtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
-															virtualInputManager:SendKeyEvent(false, Enum.KeyCode.F, false, game)
-														else
-															ExecuteParry(SelectedParryType)
-
-															if getgenv().ManualSpamAnimationFix then
-																tbl21.Play_Animation()
-															end
-														end
+														ExecuteParry(SelectedParryType)
+														tbl21.Play_Animation()
 													end)
 												end
 
@@ -10328,12 +10347,8 @@ end
 															if not getgenv().triggerbot_enabled then
 																return
 															end
-															if getgenv().TriggerbotKeypress then
-																mouse1click()
-															else
-																ExecuteParry(SelectedParryType)
-																tbl21.Play_Animation()
-															end
+															ExecuteParry(SelectedParryType)
+															tbl21.Play_Animation()
 														end
 
 														if humanizer > 0 then
