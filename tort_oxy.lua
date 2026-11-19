@@ -32,6 +32,14 @@ pcall(function()
     gui.DisplayOrder = 100000
     gui.Parent = playerGui
 
+    local loadBlur = nil
+    pcall(function()
+        loadBlur = Instance.new("BlurEffect")
+        loadBlur.Size = 0
+        loadBlur.Parent = game:GetService("Lighting")
+        loadTween:Create(loadBlur, TweenInfo.new(0.8, Enum.EasingStyle.Quad), { Size = 18 }):Play()
+    end)
+
     local bg = Instance.new("Frame")
     bg.Size = UDim2.fromScale(1, 1)
     bg.BackgroundColor3 = Color3.fromRGB(8, 9, 12)
@@ -129,6 +137,11 @@ pcall(function()
         loadTween:Create(barBg, info, { BackgroundTransparency = 1 }):Play()
         loadTween:Create(bar, info, { BackgroundTransparency = 1 }):Play()
         task.wait(0.5)
+        if loadBlur then
+            pcall(function() loadTween:Create(loadBlur, TweenInfo.new(0.4), { Size = 0 }):Play() end)
+            task.wait(0.4)
+            pcall(function() loadBlur:Destroy() end)
+        end
         gui:Destroy()
     end)
 end)
@@ -816,6 +829,33 @@ index._connections = obj2
 												instance5.TextSize = 15
 												instance5.BackgroundColor3 = Color3.fromRGB(235, 235, 245)
 												instance5.Parent = instance2
+												local titleToken = 0
+												task.spawn(function()
+													while instance5.Parent do
+														titleToken = titleToken + 1
+														local my = titleToken
+														local glyphs = "ABCDEF0123456789<>/\\|_#"
+														for step = 1, 14 do
+															if my ~= titleToken then break end
+															local reveal = math.floor(4 * step / 14)
+															local out = {}
+															for k = 1, 4 do
+																local ch = ("TORT"):sub(k, k)
+																if k <= reveal then
+																	out[k] = ch
+																else
+																	local r = math.random(1, #glyphs)
+																	out[k] = glyphs:sub(r, r)
+																end
+															end
+															instance5.Text = table.concat(out)
+															task.wait(0.03)
+														end
+														if my == titleToken then instance5.Text = "TORT" end
+														task.wait(2.5)
+													end
+												end)
+
 												instance5.InputBegan:Connect(function(input)
 													if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 														arg._ui_open = not arg._ui_open
@@ -1138,6 +1178,33 @@ end)
 													else
 														TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Size = UDim2.fromOffset(104.5, 52) }):Play()
 														TweenService:Create(uiScale, TweenInfo.new(0.4, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), { Scale = base * 0.96 }):Play()
+													end
+												end
+
+												local sweepBeam = Instance.new("Frame")
+												sweepBeam.Size = UDim2.fromOffset(0, 479)
+												sweepBeam.BackgroundColor3 = Color3.fromRGB(139, 92, 246)
+												sweepBeam.BackgroundTransparency = 0.82
+												sweepBeam.BorderSizePixel = 0
+												sweepBeam.ZIndex = 30
+												sweepBeam.Visible = false
+												sweepBeam.Parent = frame
+												local sweepGrad = Instance.new("UIGradient")
+												sweepGrad.Transparency = NumberSequence.new({
+													NumberSequenceKeypoint.new(0, 1),
+													NumberSequenceKeypoint.new(0.8, 0.35),
+													NumberSequenceKeypoint.new(1, 1),
+												})
+												sweepGrad.Parent = sweepBeam
+
+												local baseChangeVisiblity = arg.change_visiblity
+												arg.change_visiblity = function(a, open)
+													baseChangeVisiblity(a, open)
+													if open then
+														sweepBeam.Visible = true
+														sweepBeam.Position = UDim2.fromOffset(-140, 0)
+														TweenService:Create(sweepBeam, TweenInfo.new(0.7, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), { Position = UDim2.fromOffset(698, 0) }):Play()
+														task.delay(0.72, function() sweepBeam.Visible = false end)
 													end
 												end
 
@@ -6266,6 +6333,56 @@ local OxyParry = (function()
 		return curve, targets, coords
 	end
 
+	local firstSignal = nil
+
+	local function prepareParry()
+		pcall(function()
+			local ch = lp2.Character
+			if ch then
+				local current = ch:GetAttribute("ParryTime") or 0
+				ch:SetAttribute("ParryTime", math.max(current, 0.5))
+			end
+		end)
+		pcall(function()
+			if tbl21 and type(tbl21.Play_Animation) == "function" then
+				tbl21.Play_Animation()
+			end
+		end)
+	end
+
+	local function directParry(curve, targets, coords)
+		if not firstSignal then
+			local signalOk, signalMod = false, nil
+			local pryOk, pryFn = false, nil
+			pcall(function()
+				local packages = RS:FindFirstChild("Packages")
+				local controllers = RS:FindFirstChild("Controllers")
+				local signalInst = packages and packages:FindFirstChild("Signal")
+				if signalInst then signalOk, signalMod = pcall(require, signalInst) end
+				if controllers then
+					for _, ctrl in ipairs(controllers:GetChildren()) do
+						if ctrl.Name:find("SwordsController", 1, true) then
+							local pry = ctrl:FindFirstChild("PRY")
+							if pry then pryOk, pryFn = pcall(require, pry) end
+							if pryOk then break end
+						end
+					end
+				end
+			end)
+			if signalOk and pryOk and type(signalMod) == "table" and type(signalMod.new) == "function" and type(pryFn) == "function" then
+				pcall(function()
+					firstSignal = signalMod.new()
+					firstSignal:Connect(pryFn)
+				end)
+			end
+		end
+		if not firstSignal then return false end
+		local ok = pcall(function()
+			firstSignal:Fire(0.5, curve, targets, coords, false)
+		end)
+		return ok
+	end
+
 	local api = {}
 
 	function api.ready()
@@ -6280,18 +6397,7 @@ local OxyParry = (function()
 		if type(state.token_fn) ~= "function" then return false end
 		local curve, targets, coords = buildArgs()
 		if not curve then return false end
-		pcall(function()
-			local ch = lp2.Character
-			if ch then
-				local current = ch:GetAttribute("ParryTime") or 0
-				ch:SetAttribute("ParryTime", math.max(current, 0.5))
-			end
-		end)
-		pcall(function()
-			if tbl21 and type(tbl21.Play_Animation) == "function" then
-				tbl21.Play_Animation()
-			end
-		end)
+		prepareParry()
 		local fired = false
 		for remote, captured in pairs(state.captured) do
 			local seed = captured[2]
@@ -6315,6 +6421,17 @@ local OxyParry = (function()
 			end
 		end
 		return fired
+	end
+
+	function api.directFire()
+		local now = os.clock()
+		if now - state.last < 0.045 then return false end
+		local curve, targets, coords = buildArgs()
+		if not curve then return false end
+		prepareParry()
+		local ok = directParry(curve, targets, coords)
+		if ok then state.last = now end
+		return ok
 	end
 
 	-- The replayed remote is only trusted while the server keeps confirming
@@ -6341,42 +6458,20 @@ local OxyParry = (function()
 end)()
 
 do
-	local held = false
-	local heldAt = 0
-	local lastNative = 0
 	ExecuteParry = function(_mode)
 		if v88:GetFocusedTextBox() then return false end
-		if held and os.clock() - heldAt > 0.4 then held = false end
 		local character = localPlayer2.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if not humanoid or humanoid.Health <= 0 then return false end
 
-		-- Preferred path: always replay the real parry remote once captured.
-		-- No mouse/keypress is involved in any parry after the initial capture.
-		if OxyParry and OxyParry.ready() then
+		if not OxyParry then return false end
+		if OxyParry.ready() then
 			local okRemote, fired = pcall(OxyParry.fire)
 			if okRemote and fired then return true end
 			return false
 		end
-
-		-- Native F key: only used until the remote has been captured once.
-		if held or os.clock() - lastNative < 0.05 then return false end
-		lastNative = os.clock()
-		held = true
-		heldAt = os.clock()
-		local ok, err = pcall(function()
-			virtualInputManager:SendKeyEvent(true, Enum.KeyCode.F, false, game)
-		end)
-		if not ok then
-			held = false
-			warn("[TORT recovered] Native parry input failed: " .. tostring(err))
-			return false
-		end
-		task.delay(0.03, function()
-			pcall(function() virtualInputManager:SendKeyEvent(false, Enum.KeyCode.F, false, game) end)
-			held = false
-		end)
-		return true
+		local okDirect, fired = pcall(OxyParry.directFire)
+		return okDirect and fired or false
 	end
 end
 
