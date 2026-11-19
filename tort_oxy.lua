@@ -6638,6 +6638,7 @@ local OxyParry = (function()
 
 	local animCache = {}
 	local trackCache = {}
+	local swordTypeCache = {}
 	local function findGrabAnim(animType)
 		if animCache[animType] then return animCache[animType] end
 		local shared = RS:FindFirstChild("Shared")
@@ -6670,9 +6671,14 @@ local OxyParry = (function()
 			local swords = shared and shared:FindFirstChild("ReplicatedInstances")
 			local getSword = swords and swords:FindFirstChild("Swords") and swords.Swords:FindFirstChild("GetSword")
 			local swordName = ch:GetAttribute("CurrentlyEquippedSword") or "Base Sword"
-			if getSword then
+			if swordTypeCache[swordName] then
+				animType = swordTypeCache[swordName]
+			elseif getSword then
 				local ok, info = pcall(function() return getSword:Invoke(swordName) end)
-				if ok and info and info.AnimationType then animType = info.AnimationType end
+				if ok and info and info.AnimationType then
+					animType = info.AnimationType
+					swordTypeCache[swordName] = animType
+				end
 			end
 
 			local anim = findGrabAnim(animType)
@@ -6777,9 +6783,16 @@ local OxyParry = (function()
 		return fired
 	end
 
+	local captureTimerStarted = false
 	function api.directFire()
 		local now = os.clock()
 		if now - state.last < 0.045 then return false end
+		if not captureTimerStarted then
+			captureTimerStarted = true
+			task.delay(3, function()
+				if next(state.captured) == nil then unhook() end
+			end)
+		end
 		ensureHook()
 		local curve, targets, coords = buildArgs()
 		if not curve then return false end
@@ -6803,24 +6816,32 @@ local OxyParry = (function()
 end)()
 
 do
-	local globalLast = 0
-	ExecuteParry = function(_mode)
+	local autoLast = 0
+	local function runParry(isAuto)
 		if v88:GetFocusedTextBox() then return false end
 		local now = os.clock()
-		if now - globalLast < 0.2 then return false end
+		if isAuto then
+			if now - autoLast < 0.12 then return false end
+			autoLast = now
+		end
 		local character = localPlayer2.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if not humanoid or humanoid.Health <= 0 then return false end
-		globalLast = now
 
 		if not OxyParry then return false end
 		if OxyParry.ready() then
 			local okRemote, fired = pcall(OxyParry.fire)
 			if okRemote and fired then return true end
-			return false
 		end
 		local okDirect, fired = pcall(OxyParry.directFire)
 		return okDirect and fired or false
+	end
+
+	ExecuteParry = function(_mode)
+		return runParry(true)
+	end
+	ExecuteSpam = function(_mode)
+		return runParry(false)
 	end
 end
 
@@ -6848,20 +6869,28 @@ do
 		local balls = tbl21 and tbl21.Get_Balls and tbl21.Get_Balls() or {}
 		for _, ball in pairs(balls) do
 			local target = ball and ball:GetAttribute("target")
-			if target == localPlayer2.Name and ball ~= lastBall then
+			local aimedAtUs = target == localPlayer2.Name
+			if ball ~= lastBall and (aimedAtUs or target == nil) then
 				local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
+				if not pos and ball:IsA("BasePart") then pos = ball.Position end
 				if pos then
 					local dist = (hrp.Position - pos).Magnitude
 					local toward = true
+					local velocity = nil
 					local zoomies = ball:FindFirstChild("zoomies")
 					if zoomies and zoomies.VectorVelocity then
-						local velocity = zoomies.VectorVelocity
+						velocity = zoomies.VectorVelocity
+					elseif ball:IsA("BasePart") then
+						velocity = ball.AssemblyLinearVelocity
+					end
+					if velocity then
 						local toPlayer = hrp.Position - pos
 						if velocity.Magnitude > 0 and toPlayer.Magnitude > 0 then
-							toward = velocity.Unit:Dot(toPlayer.Unit) > 0.35
+							toward = velocity.Unit:Dot(toPlayer.Unit) > 0.2
 						end
 					end
-					if dist <= 30 and toward and os.clock() - lastAuto >= 0.25 then
+					local reach = aimedAtUs and 42 or 20
+					if dist <= reach and (toward or dist <= 14) and os.clock() - lastAuto >= 0.1 then
 						lastAuto = os.clock()
 						lastBall = ball
 						lastTarget = target
@@ -7022,9 +7051,6 @@ end
 																zoomies = v97:FindFirstChild("zoomies")
 
 																if zoomies then
-																	v97:GetAttributeChangedSignal("target"):Once(function()
-																		flag19 = false
-																	end)
 
 																	if flag19 then
 																		exitTo = 1
@@ -7544,9 +7570,6 @@ end
 																		zoomies = v97:FindFirstChild("zoomies")
 
 																		if zoomies then
-																			v97:GetAttributeChangedSignal("target"):Once(function()
-																				flag19 = false
-																			end)
 
 																			if flag19 then
 																				exitTo9 = 1
@@ -8124,9 +8147,6 @@ end
 																								zoomies = v97:FindFirstChild("zoomies")
 
 																								if zoomies then
-																									v97:GetAttributeChangedSignal("target"):Once(function()
-																										flag19 = false
-																									end)
 
 																									if flag19 then
 																										exitTo4 = 1
@@ -8667,9 +8687,6 @@ end
 																									zoomies = v97:FindFirstChild("zoomies")
 
 																									if zoomies then
-																										v97:GetAttributeChangedSignal("target"):Once(function()
-																											flag19 = false
-																										end)
 
 																										if flag19 then
 																											exitTo10 = 1
@@ -8947,9 +8964,6 @@ end
 																															zoomies = v97:FindFirstChild("zoomies")
 
 																															if zoomies then
-																																v97:GetAttributeChangedSignal("target"):Once(function()
-																																	flag19 = false
-																																end)
 
 																																if flag19 then
 																																	exitTo7 = 1
@@ -9174,9 +9188,6 @@ end
 																														zoomies = v97:FindFirstChild("zoomies")
 
 																														if zoomies then
-																															v97:GetAttributeChangedSignal("target"):Once(function()
-																																flag19 = false
-																															end)
 
 																															if flag19 then
 																																exitTo13 = 1
@@ -9473,9 +9484,6 @@ end
 																																	zoomies = v97:FindFirstChild("zoomies")
 
 																																	if zoomies then
-																																		v97:GetAttributeChangedSignal("target"):Once(function()
-																																			flag19 = false
-																																		end)
 
 																																		if flag19 then
 																																			exitTo8 = 1
@@ -9679,9 +9687,6 @@ end
 																																			zoomies = v97:FindFirstChild("zoomies")
 
 																																			if zoomies then
-																																				v97:GetAttributeChangedSignal("target"):Once(function()
-																																					flag19 = false
-																																				end)
 
 																																				if flag19 then
 																																					exitTo16 = 1
@@ -10259,7 +10264,7 @@ end
 															end
 
 															if v96 <= v93 and n33 > System.__properties.__spam_threshold then
-																ExecuteParry(SelectedParryType)
+																ExecuteSpam(SelectedParryType)
 																tbl21.Play_Animation()
 															end
 
@@ -10343,7 +10348,7 @@ end
 															return
 														end
 
-														ExecuteParry(SelectedParryType)
+														ExecuteSpam(SelectedParryType)
 														tbl21.Play_Animation()
 													end)
 												end
@@ -10815,7 +10820,7 @@ end
 															if not getgenv().triggerbot_enabled then
 																return
 															end
-															ExecuteParry(SelectedParryType)
+															ExecuteSpam(SelectedParryType)
 															tbl21.Play_Animation()
 														end
 
