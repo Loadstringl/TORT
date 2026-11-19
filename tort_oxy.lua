@@ -184,6 +184,129 @@ pcall(function()
     end)
 end)
 
+-- ============================================================
+-- TORT perf HUD (KITTYLOL ball-stats style)
+-- ============================================================
+pcall(function()
+    local perfPlayers = game:GetService("Players")
+    local perfPlayer = perfPlayers.LocalPlayer
+    local perfGuiParent = perfPlayer and perfPlayer:WaitForChild("PlayerGui", 5)
+    if not perfGuiParent then return end
+    local oldPerf = perfGuiParent:FindFirstChild("TORT_PERF")
+    if oldPerf then oldPerf:Destroy() end
+
+    local perfGui = Instance.new("ScreenGui")
+    perfGui.Name = "TORT_PERF"
+    perfGui.ResetOnSpawn = false
+    perfGui.IgnoreGuiInset = true
+    perfGui.DisplayOrder = 400
+    perfGui.Parent = perfGuiParent
+
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.fromOffset(240, 102)
+    frame.Position = UDim2.fromOffset(15, 15)
+    frame.BackgroundColor3 = Color3.fromRGB(2, 2, 5)
+    frame.BorderSizePixel = 0
+    frame.Active = true
+    frame.Draggable = true
+    frame.ClipsDescendants = true
+    frame.Parent = perfGui
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 6)
+    corner.Parent = frame
+    local outline = Instance.new("UIStroke")
+    outline.Color = Color3.new(1, 1, 1)
+    outline.Transparency = 0.8
+    outline.Thickness = 1.2
+    outline.Parent = frame
+    local gradient = Instance.new("UIGradient")
+    gradient.Rotation = 120
+    gradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(1, 1, 3)),
+        ColorSequenceKeypoint.new(0.45, Color3.fromRGB(10, 12, 22)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(2, 2, 5)),
+    })
+    gradient.Parent = frame
+
+    local rng = Random.new(2024)
+    for _ = 1, 24 do
+        local star = Instance.new("Frame")
+        local size = rng:NextNumber() < 0.08 and 2 or 1
+        star.Size = UDim2.fromOffset(size, size)
+        star.Position = UDim2.fromScale(rng:NextNumber(), rng:NextNumber())
+        star.BackgroundColor3 = Color3.fromRGB(220, 225, 245)
+        star.BackgroundTransparency = rng:NextNumber(0.3, 0.9)
+        star.BorderSizePixel = 0
+        star.Parent = frame
+    end
+
+    local function perfLabel(value, position, size, font, textSize, color, align)
+        local item = Instance.new("TextLabel")
+        item.BackgroundTransparency = 1
+        item.Position = position
+        item.Size = size
+        item.Text = value
+        item.Font = font
+        item.TextSize = textSize
+        item.TextColor3 = color
+        item.TextXAlignment = align or Enum.TextXAlignment.Center
+        item.Parent = frame
+        return item
+    end
+
+    perfLabel("PERF", UDim2.fromOffset(14, 0), UDim2.new(1, -28, 0, 28), Enum.Font.GothamBold, 11, Color3.fromRGB(225, 225, 230), Enum.TextXAlignment.Left)
+    local separator = Instance.new("Frame")
+    separator.Position = UDim2.fromOffset(14, 28)
+    separator.Size = UDim2.new(1, -28, 0, 1)
+    separator.BackgroundColor3 = Color3.new(1, 1, 1)
+    separator.BackgroundTransparency = 0.82
+    separator.BorderSizePixel = 0
+    separator.Parent = frame
+    local divider = Instance.new("Frame")
+    divider.Position = UDim2.new(0.5, 0, 0, 40)
+    divider.Size = UDim2.new(0, 1, 0, 50)
+    divider.BackgroundColor3 = Color3.new(1, 1, 1)
+    divider.BackgroundTransparency = 0.82
+    divider.BorderSizePixel = 0
+    divider.Parent = frame
+    perfLabel("FPS", UDim2.new(0, 0, 0, 40), UDim2.new(0.5, 0, 0, 12), Enum.Font.GothamMedium, 9, Color3.fromRGB(150, 150, 158))
+    perfLabel("PING", UDim2.new(0.5, 0, 0, 40), UDim2.new(0.5, 0, 0, 12), Enum.Font.GothamMedium, 9, Color3.fromRGB(150, 150, 158))
+    local fpsValue = perfLabel("--", UDim2.new(0, 0, 0, 56), UDim2.new(0.5, 0, 0, 32), Enum.Font.GothamBold, 22, Color3.new(1, 1, 1))
+    local pingValue = perfLabel("--", UDim2.new(0.5, 0, 0, 56), UDim2.new(0.5, 0, 0, 32), Enum.Font.GothamBold, 22, Color3.new(1, 1, 1))
+
+    local function perfPingColor(p)
+        p = math.clamp(p or 0, 0, 9999)
+        local green = Color3.fromRGB(72, 220, 150)
+        local yellow = Color3.fromRGB(255, 214, 100)
+        local orange = Color3.fromRGB(255, 150, 70)
+        local red = Color3.fromRGB(255, 60, 60)
+        if p <= 50 then return green end
+        if p <= 100 then return green:Lerp(yellow, (p - 50) / 50) end
+        if p <= 150 then return yellow:Lerp(orange, (p - 100) / 50) end
+        if p <= 200 then return orange:Lerp(red, (p - 150) / 50) end
+        return red
+    end
+
+    local perfFrames = 0
+    local perfClock = os.clock()
+    game:GetService("RunService").RenderStepped:Connect(function()
+        perfFrames = perfFrames + 1
+        local nowPerf = os.clock()
+        if nowPerf - perfClock >= 0.5 then
+            fpsValue.Text = string.format("%d", math.floor(perfFrames / (nowPerf - perfClock) + 0.5))
+            local ping = 0
+            pcall(function()
+                local stat = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
+                if stat then ping = math.floor(stat:GetValue() + 0.5) end
+            end)
+            pingValue.Text = string.format("%d", ping)
+            pingValue.TextColor3 = perfPingColor(ping)
+            perfFrames = 0
+            perfClock = nowPerf
+        end
+    end)
+end)
+
 -- Best-effort source reconstruction. See Reconstruction_Report.md.
 -- Constants were inferred; game-dependent features require runtime validation.
 local cloneref = cloneref or function(value) return value end
@@ -883,6 +1006,7 @@ index._connections = obj2
 												bgGrad.Rotation = 0
 												bgGrad.Parent = bgFx
 												task.spawn(function()
+													while not getgenv().TORT_UI_READY do task.wait(0.2) end
 													while bgFx.Parent do
 														bgGrad.Rotation = 0
 														TweenService:Create(bgGrad, TweenInfo.new(7, Enum.EasingStyle.Linear), { Rotation = 360 }):Play()
@@ -902,6 +1026,7 @@ index._connections = obj2
 													dot.Position = UDim2.new(math.random(0, 90) / 100, 0, math.random(0, 90) / 100, 0)
 													dot.Parent = bgFx
 													task.spawn(function()
+														while not getgenv().TORT_UI_READY do task.wait(0.2) end
 														while dot.Parent do
 															local duration = math.random(25, 55) / 10
 															TweenService:Create(dot, TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
@@ -921,6 +1046,7 @@ index._connections = obj2
 												scanline.ZIndex = 0
 												scanline.Parent = bgFx
 												task.spawn(function()
+													while not getgenv().TORT_UI_READY do task.wait(0.2) end
 													while scanline.Parent do
 														scanline.Position = UDim2.fromScale(0, 0)
 														TweenService:Create(scanline, TweenInfo.new(4, Enum.EasingStyle.Linear), { Position = UDim2.fromScale(0, 1) }):Play()
@@ -945,6 +1071,7 @@ index._connections = obj2
 												stripeGrad.Rotation = 35
 												stripeGrad.Parent = stripeGradFrame
 												task.spawn(function()
+													while not getgenv().TORT_UI_READY do task.wait(0.2) end
 													while stripeGrad.Parent do
 														stripeGrad.Offset = Vector2.new(-1, 0)
 														TweenService:Create(stripeGrad, TweenInfo.new(5, Enum.EasingStyle.Linear), { Offset = Vector2.new(1, 0) }):Play()
@@ -964,40 +1091,12 @@ index._connections = obj2
 												glowGrad.Transparency = NumberSequence.new(0.88)
 												glowGrad.Parent = glowFx
 												task.spawn(function()
+													while not getgenv().TORT_UI_READY do task.wait(0.2) end
 													while glowFx.Parent do
 														TweenService:Create(glowFx, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { BackgroundTransparency = 0.84 }):Play()
 														task.wait(1.6)
 														TweenService:Create(glowFx, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { BackgroundTransparency = 0.96 }):Play()
 														task.wait(1.6)
-													end
-												end)
-
-												local perfLabel = Instance.new("TextLabel")
-												perfLabel.Size = UDim2.fromOffset(170, 22)
-												perfLabel.Position = UDim2.fromOffset(520, 6)
-												perfLabel.BackgroundTransparency = 1
-												perfLabel.TextColor3 = Color3.fromRGB(185, 205, 255)
-												perfLabel.Text = "FPS: -- | PING: --"
-												perfLabel.Font = Enum.Font.Code
-												perfLabel.TextSize = 14
-												perfLabel.TextXAlignment = Enum.TextXAlignment.Right
-												perfLabel.ZIndex = 10
-												perfLabel.Parent = instance2
-												local perfFrames = 0
-												local perfLast = os.clock()
-												game:GetService("RunService").RenderStepped:Connect(function()
-													perfFrames = perfFrames + 1
-													local nowPerf = os.clock()
-													if nowPerf - perfLast >= 1 then
-														local fpsNow = math.floor(perfFrames / (nowPerf - perfLast) + 0.5)
-														local pingNow = "--"
-														pcall(function()
-															local stat = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
-															if stat then pingNow = tostring(math.floor(stat:GetValue() + 0.5)) end
-														end)
-														perfLabel.Text = string.format("FPS: %d | PING: %s", fpsNow, pingNow)
-														perfFrames = 0
-														perfLast = nowPerf
 													end
 												end)
 
@@ -1012,6 +1111,7 @@ index._connections = obj2
 													sprite.Position = UDim2.new(0.90 + (spriteIndex - 1) * 0.035, 0, 0.055, 0)
 													sprite.Parent = instance2
 													task.spawn(function()
+														while not getgenv().TORT_UI_READY do task.wait(0.2) end
 														local frame = 0
 														while sprite.Parent do
 															frame = frame % 10 + 1
