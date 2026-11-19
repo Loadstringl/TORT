@@ -829,6 +829,26 @@ index._connections = obj2
 												instance5.TextSize = 15
 												instance5.BackgroundColor3 = Color3.fromRGB(235, 235, 245)
 												instance5.Parent = instance2
+												for spriteIndex = 1, 2 do
+													local sprite = Instance.new("ImageLabel")
+													sprite.Image = "rbxassetid://87073625404390"
+													sprite.ImageRectSize = Vector2.new(32, 32)
+													sprite.Size = UDim2.fromOffset(22, 22)
+													sprite.BackgroundTransparency = 1
+													sprite.BorderSizePixel = 0
+													sprite.ZIndex = 5
+													sprite.Position = UDim2.new(0.90 + (spriteIndex - 1) * 0.035, 0, 0.055, 0)
+													sprite.Parent = instance2
+													task.spawn(function()
+														local frame = 0
+														while sprite.Parent do
+															frame = frame % 10 + 1
+															sprite.ImageRectOffset = Vector2.new((frame - 1) * 32, 0)
+															task.wait(0.11 + spriteIndex * 0.035)
+														end
+													end)
+												end
+
 												local titleToken = 0
 												task.spawn(function()
 													while instance5.Parent do
@@ -6334,19 +6354,61 @@ local OxyParry = (function()
 	end
 
 	local firstSignal = nil
+	getgenv().TORTParryStats = getgenv().TORTParryStats or { direct = 0, remote = 0 }
+
+	local function findGrabAnim(animType)
+		local shared = RS:FindFirstChild("Shared")
+		if not shared then return nil end
+		local collection = shared:FindFirstChild("SwordAPI")
+		collection = collection and (collection:FindFirstChild("Collection") or collection)
+		if not collection then return nil end
+		local folder = collection:FindFirstChild(animType) or collection:FindFirstChild("Default")
+		if not folder then return nil end
+		local anim = folder:FindFirstChild("GrabParry") or folder:FindFirstChild("Parry") or folder:FindFirstChild("Grab")
+		if not anim then
+			local base = folder:FindFirstChild("Base")
+			if base then
+				anim = base:FindFirstChild("GrabParry") or base:FindFirstChild("Parry") or base:FindFirstChild("Grab")
+			end
+		end
+		return anim
+	end
 
 	local function prepareParry()
 		pcall(function()
 			local ch = lp2.Character
-			if ch then
-				local current = ch:GetAttribute("ParryTime") or 0
-				ch:SetAttribute("ParryTime", math.max(current, 0.5))
+			local hum = ch and ch:FindFirstChildOfClass("Humanoid")
+			local animator = hum and hum:FindFirstChildOfClass("Animator")
+			if not ch or not animator then return end
+
+			local animType = "Single"
+			local shared = RS:FindFirstChild("Shared")
+			local swords = shared and shared:FindFirstChild("ReplicatedInstances")
+			local getSword = swords and swords:FindFirstChild("Swords") and swords.Swords:FindFirstChild("GetSword")
+			local swordName = ch:GetAttribute("CurrentlyEquippedSword") or "Base Sword"
+			if getSword then
+				local ok, info = pcall(function() return getSword:Invoke(swordName) end)
+				if ok and info and info.AnimationType then animType = info.AnimationType end
 			end
-		end)
-		pcall(function()
-			if tbl21 and type(tbl21.Play_Animation) == "function" then
-				tbl21.Play_Animation()
+
+			local anim = findGrabAnim(animType)
+			if not anim then return end
+			for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+				if tr:GetAttribute("GrabParry") or tr:GetAttribute("Parry") or tr:GetAttribute("SuccessParry") then
+					pcall(tr.Stop, tr, tr:GetAttribute("StopFadeTime") or 0.05)
+				end
 			end
+			local track = animator:LoadAnimation(anim)
+			for k, v in pairs(anim:GetAttributes()) do track:SetAttribute(k, v) end
+			track:SetAttribute("GrabParry", true)
+			track.Priority = Enum.AnimationPriority.Action4
+			track.TimePosition = 0
+			track:Play(anim:GetAttribute("PlayFadeTime") or 0.05, anim:GetAttribute("PlayWeight") or 1, anim:GetAttribute("PlaySpeed") or 1)
+			local length = track.Length and track.Length ~= 0 and track.Length or 0.5
+			ch:SetAttribute("ParryTime", math.max(ch:GetAttribute("ParryTime") or 0, length))
+			task.delay(0.12, function()
+				pcall(function() track:Stop(track:GetAttribute("StopFadeTime") or 0.05) end)
+			end)
 		end)
 	end
 
@@ -6415,6 +6477,7 @@ local OxyParry = (function()
 		end
 		if fired then
 			state.last = now
+			getgenv().TORTParryStats.remote = getgenv().TORTParryStats.remote + 1
 			state.attempts = state.attempts + 1
 			if state.firstAttemptAt == 0 then
 				state.firstAttemptAt = now
@@ -6430,7 +6493,10 @@ local OxyParry = (function()
 		if not curve then return false end
 		prepareParry()
 		local ok = directParry(curve, targets, coords)
-		if ok then state.last = now end
+		if ok then
+			state.last = now
+			getgenv().TORTParryStats.direct = getgenv().TORTParryStats.direct + 1
+		end
 		return ok
 	end
 
