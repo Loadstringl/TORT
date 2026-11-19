@@ -6524,11 +6524,15 @@ local OxyParry = (function()
 end)()
 
 do
+	local globalLast = 0
 	ExecuteParry = function(_mode)
 		if v88:GetFocusedTextBox() then return false end
+		local now = os.clock()
+		if now - globalLast < 0.2 then return false end
 		local character = localPlayer2.Character
 		local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 		if not humanoid or humanoid.Health <= 0 then return false end
+		globalLast = now
 
 		if not OxyParry then return false end
 		if OxyParry.ready() then
@@ -6543,6 +6547,8 @@ end
 
 do
 	local lastAuto = 0
+	local lastBall = nil
+	local lastTarget = nil
 	v85.PreSimulation:Connect(function()
 		if not System or not System.__properties or not System.__properties.__autoparry_enabled then
 			return
@@ -6550,14 +6556,36 @@ do
 		local ch = localPlayer2.Character
 		local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
 		if not hrp then return end
+
+		if lastBall then
+			local stillThreat = lastBall.Parent ~= nil and lastBall:GetAttribute("target") == lastTarget
+			if stillThreat and tbl21.Ball_Position then
+				local lastPos = tbl21.Ball_Position(lastBall)
+				if lastPos and (hrp.Position - lastPos).Magnitude > 45 then stillThreat = false end
+			end
+			if not stillThreat then lastBall = nil end
+		end
+
 		local balls = tbl21 and tbl21.Get_Balls and tbl21.Get_Balls() or {}
 		for _, ball in pairs(balls) do
-			if ball and ball:GetAttribute("target") == localPlayer2.Name then
+			local target = ball and ball:GetAttribute("target")
+			if target == localPlayer2.Name and ball ~= lastBall then
 				local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
 				if pos then
 					local dist = (hrp.Position - pos).Magnitude
-					if dist <= 55 and os.clock() - lastAuto >= 0.08 then
+					local toward = true
+					local zoomies = ball:FindFirstChild("zoomies")
+					if zoomies and zoomies.VectorVelocity then
+						local velocity = zoomies.VectorVelocity
+						local toPlayer = hrp.Position - pos
+						if velocity.Magnitude > 0 and toPlayer.Magnitude > 0 then
+							toward = velocity.Unit:Dot(toPlayer.Unit) > 0.35
+						end
+					end
+					if dist <= 30 and toward and os.clock() - lastAuto >= 0.25 then
 						lastAuto = os.clock()
+						lastBall = ball
+						lastTarget = target
 						pcall(ExecuteParry, SelectedParryType)
 						break
 					end
