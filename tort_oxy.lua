@@ -211,6 +211,12 @@ pcall(function()
     frame.Draggable = true
     frame.ClipsDescendants = true
     frame.Parent = perfGui
+    local perfCamera = game:GetService("Workspace").CurrentCamera
+    local perfViewport = perfCamera and perfCamera.ViewportSize or Vector2.new(1920, 1080)
+    local perfScale = math.clamp(math.min(perfViewport.X, perfViewport.Y) / 900, 0.6, 1)
+    local perfUiScale = Instance.new("UIScale")
+    perfUiScale.Scale = perfScale
+    perfUiScale.Parent = frame
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, 6)
     corner.Parent = frame
@@ -1330,22 +1336,13 @@ index._connections = obj2
 													v111 = Stats.Network.ServerStatsItem["Data Ping"]
 												end)
 
-												do
-    local elapsed, frames = 0, 0
-    textLabel3.Text = "FPS -- | Ping --"
-    obj2.performance_label = RunService.RenderStepped:Connect(function(dt)
-        if not textLabel3.Parent then obj2:disconnect("performance_label"); return end
-        elapsed += dt
-        frames += 1
-        if elapsed < 0.5 then return end
-        local ping = 0
-        if v111 then pcall(function() ping = v111:GetValue() end) end
-        textLabel3.Text = string.format("%d FPS | %d ms", math.floor(frames / elapsed + 0.5), math.floor(ping + 0.5))
-        elapsed, frames = 0, 0
-    end)
-end
 												local uiScale = Instance.new("UIScale")
 												uiScale.Parent = frame
+												local mobileCam = game:GetService("Workspace").CurrentCamera
+												local mobileView = mobileCam and mobileCam.ViewportSize or Vector2.new(1920, 1080)
+												local mobileScale = math.clamp(math.min(mobileView.X, mobileView.Y) / 900, 0.55, 1)
+												arg._ui_scale = (tonumber(getgenv().TORTUIScale) or 1.35) * mobileScale
+												uiScale.Scale = arg._ui_scale
 												arg._ui = screenGui
 screenGui.Destroying:Connect(function()
     obj2:disconnect_all()
@@ -1711,7 +1708,7 @@ end)
 														arg2:update_sections(scrollingFrame, scrollingFrame2)
 													end
 
-													textButton.MouseButton1Click:Connect(function()
+													textButton.Activated:Connect(function()
 														arg2:update_tabs(textButton, scrollingFrame, scrollingFrame2)
 														arg2:update_sections(scrollingFrame, scrollingFrame2)
 													end)
@@ -2037,7 +2034,7 @@ end)
 															end)
 														end)
 
-														textButton2.MouseButton1Click:Connect(function()
+														textButton2.Activated:Connect(function()
 															tbl28:change_state(not tbl28._state)
 														end)
 
@@ -2448,7 +2445,7 @@ end)
 																tbl29:change_state(index._config._flags[arg6.flag])
 															end
 
-															textButton3.MouseButton1Click:Connect(function()
+															textButton3.Activated:Connect(function()
 																tbl29:change_state(not tbl29._state)
 															end)
 
@@ -3546,7 +3543,7 @@ end)
 																			fn41()
 																		end)
 
-																		instance27.MouseButton1Click:Connect(function()
+																		instance27.Activated:Connect(function()
 																			if index._choosing_keybind or flag23 then
 																				return
 																			end
@@ -3610,7 +3607,7 @@ end)
 																	instance27.Transparency = numberSequence4(tbl31)
 																	instance27.Parent = textButton3
 
-																	textButton3.MouseButton1Click:Connect(function()
+																	textButton3.Activated:Connect(function()
 																		if not index._config._flags[arg6.flag] then
 																			index._config._flags[arg6.flag] = {}
 																		end
@@ -3650,7 +3647,7 @@ end)
 																tbl29:update(arg6.options[1])
 															end
 
-															instance23.MouseButton1Click:Connect(function()
+															instance23.Activated:Connect(function()
 																tbl29:unfold_settings()
 
 																if false then -- recovered opaque guard
@@ -3812,7 +3809,7 @@ end)
 																end
 															end)
 
-															instance24.MouseButton1Click:Connect(function()
+															instance24.Activated:Connect(function()
 																if arg6.button_callback then
 																	arg6.button_callback()
 																end
@@ -3847,7 +3844,7 @@ end)
 																		textButton3.BackgroundColor3 = Color3.fromRGB(40, 24, 32)
 																	end)
 
-																	textButton3.MouseButton1Click:Connect(function()
+																	textButton3.Activated:Connect(function()
 																		arg6.on_delete()
 																	end)
 																end
@@ -3878,7 +3875,7 @@ end)
 																uiStroke4.Thickness = 1
 																uiStroke4.Parent = textButton3
 
-																textButton3.MouseButton1Click:Connect(function()
+																textButton3.Activated:Connect(function()
 																	checked = not checked
 																	textButton3.BackgroundColor3 = checked and Color3.fromRGB(139, 92, 246) or Color3.fromRGB(18, 18, 24)
 																	index._config._flags[arg6.flag].checked = checked
@@ -3936,7 +3933,7 @@ end)
 													end
 												end)
 
-												arg._ui.Container.Handler.Minimize.MouseButton1Click:Connect(function()
+												arg._ui.Container.Handler.Minimize.Activated:Connect(function()
 													arg._ui_open = not arg._ui_open
 													arg:change_visiblity(arg._ui_open)
 												end)
@@ -6459,8 +6456,11 @@ local OxyParry = (function()
 		end
 	end)
 
+	local tokenSearched = false
 	local function findToken()
 		if type(state.token_fn) == "function" then return true end
+		if tokenSearched then return false end
+		tokenSearched = true
 		if type(getgc2) ~= "function" then return false end
 		local gc = getgc2(true)
 		if type(gc) ~= "table" then return false end
@@ -6558,8 +6558,10 @@ local OxyParry = (function()
 		if wasRO and type(setro2) == "function" then pcall(setro2, meta, true) end
 	end
 
+	local hookScanned = false
 	local function ensureHook()
-		if next(state.captured) ~= nil then return end
+		if hookScanned or next(state.captured) ~= nil then return end
+		hookScanned = true
 		pcall(function()
 			for _, d in ipairs(RS:GetDescendants()) do
 				if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
@@ -6634,7 +6636,10 @@ local OxyParry = (function()
 	local firstSignal = nil
 	getgenv().TORTParryStats = getgenv().TORTParryStats or { direct = 0, remote = 0 }
 
+	local animCache = {}
+	local trackCache = {}
 	local function findGrabAnim(animType)
+		if animCache[animType] then return animCache[animType] end
 		local shared = RS:FindFirstChild("Shared")
 		if not shared then return nil end
 		local collection = shared:FindFirstChild("SwordAPI")
@@ -6649,6 +6654,7 @@ local OxyParry = (function()
 				anim = base:FindFirstChild("GrabParry") or base:FindFirstChild("Parry") or base:FindFirstChild("Grab")
 			end
 		end
+		animCache[animType] = anim
 		return anim
 	end
 
@@ -6676,10 +6682,16 @@ local OxyParry = (function()
 					pcall(tr.Stop, tr, tr:GetAttribute("StopFadeTime") or 0.05)
 				end
 			end
-			local track = animator:LoadAnimation(anim)
-			for k, v in pairs(anim:GetAttributes()) do track:SetAttribute(k, v) end
-			track:SetAttribute("GrabParry", true)
-			track.Priority = Enum.AnimationPriority.Action4
+			local trackKey = anim:GetFullName()
+			local entry = trackCache[trackKey]
+			if not entry or entry.Animator ~= animator then
+				entry = { Animator = animator, Track = animator:LoadAnimation(anim) }
+				for k, v in pairs(anim:GetAttributes()) do entry.Track:SetAttribute(k, v) end
+				entry.Track:SetAttribute("GrabParry", true)
+				entry.Track.Priority = Enum.AnimationPriority.Action4
+				trackCache[trackKey] = entry
+			end
+			local track = entry.Track
 			track.TimePosition = 0
 			track:Play(anim:GetAttribute("PlayFadeTime") or 0.05, anim:GetAttribute("PlayWeight") or 1, anim:GetAttribute("PlaySpeed") or 1)
 			local length = track.Length and track.Length ~= 0 and track.Length or 0.5
@@ -12895,13 +12907,13 @@ local function fn31()
 											local color2 = Color3.fromRGB
 											fn31(instance5, Color3.fromRGB(60, 60, 60), color2(85, 85, 85))
 
-											textButton.MouseButton1Click:Connect(function()
+											textButton.Activated:Connect(function()
 												local v94 = v91[math.random(1, #v91)]
 												tbl24[i].emote = v94
 												textButton.Text = v94
 											end)
 
-											instance5.MouseButton1Click:Connect(function()
+											instance5.Activated:Connect(function()
 												instance5.Text = "..."
 												local connection = nil
 
