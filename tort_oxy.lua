@@ -37,7 +37,7 @@ pcall(function()
         loadBlur = Instance.new("BlurEffect")
         loadBlur.Size = 0
         loadBlur.Parent = game:GetService("Lighting")
-        loadTween:Create(loadBlur, TweenInfo.new(0.8, Enum.EasingStyle.Quad), { Size = 18 }):Play()
+        loadTween:Create(loadBlur, TweenInfo.new(0.45, Enum.EasingStyle.Quad), { Size = 6 }):Play()
     end)
 
     local bg = Instance.new("Frame")
@@ -829,6 +829,96 @@ index._connections = obj2
 												instance5.TextSize = 15
 												instance5.BackgroundColor3 = Color3.fromRGB(235, 235, 245)
 												instance5.Parent = instance2
+												local bgFx = Instance.new("Frame")
+												bgFx.Size = UDim2.fromScale(1, 1)
+												bgFx.BackgroundColor3 = Color3.fromRGB(12, 10, 24)
+												bgFx.BorderSizePixel = 0
+												bgFx.ZIndex = 0
+												bgFx.Parent = frame
+												local bgGrad = Instance.new("UIGradient")
+												bgGrad.Color = ColorSequence.new({
+													ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 20, 95)),
+													ColorSequenceKeypoint.new(0.5, Color3.fromRGB(20, 25, 70)),
+													ColorSequenceKeypoint.new(1, Color3.fromRGB(85, 20, 55)),
+												})
+												bgGrad.Transparency = NumberSequence.new(0.62)
+												bgGrad.Rotation = 0
+												bgGrad.Parent = bgFx
+												task.spawn(function()
+													while bgFx.Parent do
+														bgGrad.Rotation = 0
+														TweenService:Create(bgGrad, TweenInfo.new(7, Enum.EasingStyle.Linear), { Rotation = 360 }):Play()
+														task.wait(7)
+													end
+												end)
+
+												for dotIndex = 1, 6 do
+													local dot = Instance.new("ImageLabel")
+													dot.Image = "rbxassetid://87073625404390"
+													dot.ImageRectSize = Vector2.new(32, 32)
+													dot.ImageRectOffset = Vector2.new((dotIndex * 3 % 10) * 32, 0)
+													dot.Size = UDim2.fromOffset(16, 16)
+													dot.BackgroundTransparency = 1
+													dot.ImageTransparency = 0.78
+													dot.ZIndex = 0
+													dot.Position = UDim2.new(math.random(0, 90) / 100, 0, math.random(0, 90) / 100, 0)
+													dot.Parent = bgFx
+													task.spawn(function()
+														while dot.Parent do
+															local duration = math.random(25, 55) / 10
+															TweenService:Create(dot, TweenInfo.new(duration, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), {
+																Position = UDim2.new(math.random(0, 90) / 100, 0, math.random(0, 90) / 100, 0),
+																ImageTransparency = math.random(55, 88) / 100
+															}):Play()
+															task.wait(duration)
+														end
+													end)
+												end
+
+												local scanline = Instance.new("Frame")
+												scanline.Size = UDim2.new(1, 0, 0, 2)
+												scanline.BackgroundColor3 = Color3.fromRGB(190, 170, 255)
+												scanline.BackgroundTransparency = 0.9
+												scanline.BorderSizePixel = 0
+												scanline.ZIndex = 0
+												scanline.Parent = bgFx
+												task.spawn(function()
+													while scanline.Parent do
+														scanline.Position = UDim2.fromScale(0, 0)
+														TweenService:Create(scanline, TweenInfo.new(4, Enum.EasingStyle.Linear), { Position = UDim2.fromScale(0, 1) }):Play()
+														task.wait(4)
+													end
+												end)
+
+												local perfLabel = Instance.new("TextLabel")
+												perfLabel.Size = UDim2.fromOffset(170, 22)
+												perfLabel.Position = UDim2.fromOffset(520, 6)
+												perfLabel.BackgroundTransparency = 1
+												perfLabel.TextColor3 = Color3.fromRGB(185, 205, 255)
+												perfLabel.Text = "FPS: -- | PING: --"
+												perfLabel.Font = Enum.Font.Code
+												perfLabel.TextSize = 14
+												perfLabel.TextXAlignment = Enum.TextXAlignment.Right
+												perfLabel.ZIndex = 10
+												perfLabel.Parent = instance2
+												local perfFrames = 0
+												local perfLast = os.clock()
+												v85.RenderStepped:Connect(function()
+													perfFrames = perfFrames + 1
+													local nowPerf = os.clock()
+													if nowPerf - perfLast >= 1 then
+														local fpsNow = math.floor(perfFrames / (nowPerf - perfLast) + 0.5)
+														local pingNow = "--"
+														pcall(function()
+															local stat = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
+															if stat then pingNow = tostring(math.floor(stat:GetValue() + 0.5)) end
+														end)
+														perfLabel.Text = string.format("FPS: %d | PING: %s", fpsNow, pingNow)
+														perfFrames = 0
+														perfLast = nowPerf
+													end
+												end)
+
 												for spriteIndex = 1, 2 do
 													local sprite = Instance.new("ImageLabel")
 													sprite.Image = "rbxassetid://87073625404390"
@@ -6184,10 +6274,11 @@ local OxyParry = (function()
 		end
 	end)
 
-	pcall(function()
-		if type(getgc2) ~= "function" then return end
+	local function findToken()
+		if type(state.token_fn) == "function" then return true end
+		if type(getgc2) ~= "function" then return false end
 		local gc = getgc2(true)
-		if type(gc) ~= "table" then return end
+		if type(gc) ~= "table" then return false end
 		for _, f in ipairs(gc) do
 			if type(f) == "function" then
 				local okSrc, src = pcall(debug.info, f, "s")
@@ -6201,13 +6292,15 @@ local OxyParry = (function()
 							end
 						end
 					end
-					if state.token_fn then break end
+					if state.token_fn then return true end
 				end
 			end
 		end
-	end)
+		return false
+	end
 
 	local function polygon(seed)
+		if type(state.token_fn) ~= "function" then findToken() end
 		if type(state.token_fn) ~= "function" then return nil end
 		local sec = tostring(math.floor(Workspace2:GetServerTimeNow() * 100))
 		local okTok, tok = pcall(state.token_fn, seed, "TIME")
@@ -6448,6 +6541,7 @@ local OxyParry = (function()
 	local api = {}
 
 	function api.ready()
+		if type(state.token_fn) ~= "function" then findToken() end
 		return next(state.captured) ~= nil and type(state.token_fn) == "function"
 	end
 
@@ -6489,6 +6583,7 @@ local OxyParry = (function()
 	function api.directFire()
 		local now = os.clock()
 		if now - state.last < 0.045 then return false end
+		ensureHook()
 		local curve, targets, coords = buildArgs()
 		if not curve then return false end
 		prepareParry()
@@ -6506,19 +6601,6 @@ local OxyParry = (function()
 	function api.usable()
 		return true
 	end
-
-	pcall(function()
-		RS.DescendantAdded:Connect(function(d)
-			if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
-				if next(state.captured) == nil then pcall(hook, d) end
-			end
-		end)
-	end)
-
-	task.spawn(function()
-		task.wait(1)
-		pcall(ensureHook)
-	end)
 
 	return api
 end)()
