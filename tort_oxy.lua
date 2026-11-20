@@ -6639,6 +6639,7 @@ local OxyParry = (function()
 	local animCache = {}
 	local trackCache = {}
 	local swordTypeCache = {}
+	local lastGrab = 0
 	local function findGrabAnim(animType)
 		if animCache[animType] then return animCache[animType] end
 		local shared = RS:FindFirstChild("Shared")
@@ -6683,11 +6684,6 @@ local OxyParry = (function()
 
 			local anim = findGrabAnim(animType)
 			if not anim then return end
-			for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
-				if tr:GetAttribute("GrabParry") or tr:GetAttribute("Parry") or tr:GetAttribute("SuccessParry") then
-					pcall(tr.Stop, tr, tr:GetAttribute("StopFadeTime") or 0.05)
-				end
-			end
 			local trackKey = anim:GetFullName()
 			local entry = trackCache[trackKey]
 			if not entry or entry.Animator ~= animator then
@@ -6698,10 +6694,18 @@ local OxyParry = (function()
 				trackCache[trackKey] = entry
 			end
 			local track = entry.Track
-			track.TimePosition = 0
-			track:Play(anim:GetAttribute("PlayFadeTime") or 0.05, anim:GetAttribute("PlayWeight") or 1, anim:GetAttribute("PlaySpeed") or 1)
 			local length = track.Length and track.Length ~= 0 and track.Length or 0.5
 			ch:SetAttribute("ParryTime", math.max(ch:GetAttribute("ParryTime") or 0, length))
+			local nowGrab = os.clock()
+			if nowGrab - lastGrab < 0.1 then return end
+			lastGrab = nowGrab
+			for _, tr in ipairs(animator:GetPlayingAnimationTracks()) do
+				if tr:GetAttribute("GrabParry") or tr:GetAttribute("Parry") or tr:GetAttribute("SuccessParry") then
+					pcall(tr.Stop, tr, tr:GetAttribute("StopFadeTime") or 0.05)
+				end
+			end
+			track.TimePosition = 0
+			track:Play(anim:GetAttribute("PlayFadeTime") or 0.05, anim:GetAttribute("PlayWeight") or 1, anim:GetAttribute("PlaySpeed") or 1)
 			task.delay(0.12, function()
 				pcall(function() track:Stop(track:GetAttribute("StopFadeTime") or 0.05) end)
 			end)
@@ -6856,6 +6860,23 @@ do
 		return 0.7 + (accuracyValue - 1) * 0.0035353535353535
 	end
 
+	local ballPositions = setmetatable({}, { __mode = "k" })
+	pcall(function()
+		local packages = RS:FindFirstChild("Packages")
+		local index = packages and packages:FindFirstChild("_Index")
+		local net = index and index:FindFirstChild("sleitnick_net@0.1.0")
+		net = net and net:FindFirstChild("net")
+		if not net then return end
+		for _, child in ipairs(net:GetChildren()) do
+			if child:IsA("UnreliableRemoteEvent") and child.Name ~= "URE/ReplicateBallPosition" then
+				child.OnClientEvent:Connect(function(ball, position)
+					if ball and ball:GetAttribute("realBall") == true then ballPositions[ball] = position end
+				end)
+				break
+			end
+		end
+	end)
+
 	v85.PostSimulation:Connect(function()
 		if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
 		local now = os.clock()
@@ -6864,7 +6885,12 @@ do
 		local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
 		if not hrp then return end
 
-		local realBall = tbl21 and tbl21.Get_Ball and tbl21.Get_Ball()
+		local balls = tbl21 and tbl21.Get_Balls and tbl21.Get_Balls() or {}
+		local realBall = nil
+		for _, ball in pairs(balls) do
+			if ball and ball:GetAttribute("realBall") == true then realBall = ball break end
+		end
+		if not realBall and tbl21 and tbl21.Get_Ball then realBall = tbl21.Get_Ball() end
 		local realTarget = realBall and realBall:GetAttribute("target")
 		local ping = 0
 		pcall(function()
@@ -6879,16 +6905,16 @@ do
 		end
 		local pingThreshold = math.clamp(ping / 80, 4, 25)
 		local multiplier = speedMultiplier()
-		local balls = tbl21 and tbl21.Get_Balls and tbl21.Get_Balls() or {}
 
 		for _, ball in pairs(balls) do
-			if ball and ball.Parent then
+			if ball and ball.Parent and ball:GetAttribute("realBall") == true then
 				local zoomies = ball:FindFirstChild("zoomies")
 				if zoomies then
 					local ballTarget = ball:GetAttribute("target")
 					local velocity = zoomies.VectorVelocity
 					local speed = velocity.Magnitude
-					local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
+					local pos = ballPositions[ball]
+					if not pos and tbl21.Ball_Position then pos = tbl21.Ball_Position(ball) end
 					if not pos and ball:IsA("BasePart") then pos = ball.Position end
 					if pos then
 						local distance = (hrp.Position - pos).Magnitude
@@ -6923,8 +6949,9 @@ do
 				local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
 				if not hrp then return end
 				local ball = tbl21 and tbl21.Get_Ball and tbl21.Get_Ball()
-				if not ball then return end
-				local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
+				if not ball or ball:GetAttribute("realBall") ~= true then return end
+				local pos = ballPositions[ball]
+				if not pos and tbl21.Ball_Position then pos = tbl21.Ball_Position(ball) end
 				if not pos and ball:IsA("BasePart") then pos = ball.Position end
 				if not pos then return end
 				local zoomies = ball:FindFirstChild("zoomies")
