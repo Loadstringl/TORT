@@ -6877,6 +6877,23 @@ do
 		end
 	end)
 
+	local boundBalls = setmetatable({}, { __mode = "k" })
+	local function bindBall(ball)
+		if not ball or boundBalls[ball] then return end
+		boundBalls[ball] = true
+		pcall(function()
+			ball:GetAttributeChangedSignal("target"):Connect(function()
+				untilAt = 0
+			end)
+		end)
+	end
+	pcall(function()
+		local ballsFolder = Workspace2:FindFirstChild("Balls")
+		if not ballsFolder then return end
+		for _, ball in ipairs(ballsFolder:GetChildren()) do bindBall(ball) end
+		ballsFolder.ChildAdded:Connect(bindBall)
+	end)
+
 	v85.PostSimulation:Connect(function()
 		if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
 		local now = os.clock()
