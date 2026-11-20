@@ -6937,7 +6937,7 @@ do
 		}
 	end
 	ballState.bind = function(inputValue)
-		spawnTask(function()
+		task.spawn(function()
 			if not inputValue:GetAttribute("realBall") and not inputValue:WaitForChild("zoomies", 3) then return end
 			inputValue:GetAttributeChangedSignal("target"):Connect(function()
 				parryState.debounce = false
