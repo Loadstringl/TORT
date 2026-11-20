@@ -1,18 +1,16 @@
+pcall(function()
+    local oldSession = getgenv().TORTRecoveredSession
+    if oldSession and oldSession.window and oldSession.window._ui then
+        oldSession.window._ui:Destroy()
+    end
+end)
+getgenv().TORTRecoveredSession = nil
 getgenv().AutoParryMode = getgenv().AutoParryMode or "Distance"
 getgenv().AutoSpamMode = getgenv().AutoSpamMode or "Remote"
 getgenv().ManualSpamMode = getgenv().ManualSpamMode or "Remote"
 getgenv().TriggerbotKeypress = false
 getgenv().TORT_UI_READY = false
 
--- Reuse a completed session instead of installing duplicate hooks/connections.
-do
-    local session = getgenv().TORTRecoveredSession
-    if session and session.window and session.window._ui and session.window._ui.Parent then
-        session.window._ui.Enabled = true
-        session.window:change_visiblity(true)
-        return
-    end
-end
 -- ============================================================
 -- TORT loading animation
 -- ============================================================
