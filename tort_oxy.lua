@@ -6877,112 +6877,58 @@ do
 		end
 	end)
 
-	local boundBalls = setmetatable({}, { __mode = "k" })
-	local function bindBall(ball)
-		if not ball or boundBalls[ball] then return end
-		boundBalls[ball] = true
-		pcall(function()
-			ball:GetAttributeChangedSignal("target"):Connect(function()
-				if ball:GetAttribute("target") ~= localPlayer2.Name then untilAt = 0 end
-			end)
-		end)
+	local function getRealBall()
+		local folder = Workspace2:FindFirstChild("Balls")
+		if not folder then return nil end
+		for _, ball in ipairs(folder:GetChildren()) do
+			if ball:GetAttribute("realBall") == true then return ball end
+		end
+		return nil
 	end
-	pcall(function()
-		local ballsFolder = Workspace2:FindFirstChild("Balls")
-		if not ballsFolder then return end
-		for _, ball in ipairs(ballsFolder:GetChildren()) do bindBall(ball) end
-		ballsFolder.ChildAdded:Connect(bindBall)
-	end)
 
 	v85.PostSimulation:Connect(function()
 		if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
 		local now = os.clock()
 		if now < untilAt then return end
+		local ball = getRealBall()
+		if not ball then return end
+		local zoomies = ball:FindFirstChild("zoomies")
+		if not zoomies then return end
 		local ch = localPlayer2.Character
 		local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
 		if not hrp then return end
 
-		local balls = tbl21 and tbl21.Get_Balls and tbl21.Get_Balls() or {}
-		local realBall = nil
-		for _, ball in pairs(balls) do
-			if ball and ball:GetAttribute("realBall") == true then realBall = ball break end
-		end
-		if not realBall and tbl21 and tbl21.Get_Ball then realBall = tbl21.Get_Ball() end
-		local realTarget = realBall and realBall:GetAttribute("target")
+		local ballTarget = ball:GetAttribute("target")
+		local velocity = zoomies.VectorVelocity
+		local speed = velocity.Magnitude
+		local pos = ballPositions[ball]
+		if not pos and tbl21.Ball_Position then pos = tbl21.Ball_Position(ball) end
+		if not pos and ball:IsA("BasePart") then pos = ball.Position end
+		if not pos then return end
+
 		local ping = 0
 		pcall(function()
-			local stat = RS.Network and RS.Network.ServerStatsItem and RS.Network.ServerStatsItem["Data Ping"]
+			local stat = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
 			if stat then ping = stat:GetValue() end
 		end)
-		if ping == 0 then
-			pcall(function()
-				local stat = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
-				if stat then ping = stat:GetValue() end
-			end)
-		end
 		local pingThreshold = math.clamp(ping / 80, 4, 25)
-		local multiplier = speedMultiplier()
+		local distance = (hrp.Position - pos).Magnitude
+		local divisor = speedDivisor(speed) * speedMultiplier()
+		local speedFactor = 1
+		if speed > 200 then speedFactor = 1 + math.min((speed - 200) / 1000, 0.3) end
+		local targetDistance = pingThreshold + math.max(speed / divisor, 9.5) * speedFactor
+		local curving = ballTarget == localPlayer2.Name and ball:FindFirstChild("AeroDynamicSlashVFX") ~= nil
 
-		for _, ball in pairs(balls) do
-			if ball and ball.Parent and ball:GetAttribute("realBall") == true then
-				local zoomies = ball:FindFirstChild("zoomies")
-				if zoomies then
-					local ballTarget = ball:GetAttribute("target")
-					local velocity = zoomies.VectorVelocity
-					local speed = velocity.Magnitude
-					local pos = ballPositions[ball]
-					if not pos and tbl21.Ball_Position then pos = tbl21.Ball_Position(ball) end
-					if not pos and ball:IsA("BasePart") then pos = ball.Position end
-					if pos then
-						local distance = (hrp.Position - pos).Magnitude
-						local divisor = speedDivisor(speed) * multiplier
-						local speedFactor = 1
-						if speed > 200 then speedFactor = 1 + math.min((speed - 200) / 1000, 0.3) end
-						local targetDistance = pingThreshold + math.max(speed / divisor, 9.5) * speedFactor
-						local curving = realTarget == localPlayer2.Name and ball:FindFirstChild("AeroDynamicSlashVFX") ~= nil
-						if not curving and ballTarget == localPlayer2.Name and distance <= targetDistance then
-							if now - lastAuto >= 0.2 then
-								lastAuto = now
-								untilAt = now + 1
-								pcall(ExecuteParry, SelectedParryType)
-								return
-							end
-						end
-					end
-				end
+		if not curving and ballTarget == localPlayer2.Name and distance <= targetDistance then
+			if now - lastAuto >= 0.2 then
+				lastAuto = now
+				untilAt = now + 1
+				pcall(ExecuteParry, SelectedParryType)
 			end
 		end
 	end)
 
 	pcall(function()
-		local remotes = RS:FindFirstChild("Remotes")
-		local successAll = remotes and remotes:FindFirstChild("ParrySuccessAll")
-		if successAll then
-			successAll.OnClientEvent:Connect(function(_, source)
-				if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
-				if source and source.Parent and source.Parent ~= lp2.Character and source.Parent.Parent ~= Workspace2:FindFirstChild("Alive") then return end
-				local ch = lp2.Character
-				local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
-				if not hrp then return end
-				local ball = tbl21 and tbl21.Get_Ball and tbl21.Get_Ball()
-				if not ball or ball:GetAttribute("realBall") ~= true then return end
-				local pos = ballPositions[ball]
-				if not pos and tbl21.Ball_Position then pos = tbl21.Ball_Position(ball) end
-				if not pos and ball:IsA("BasePart") then pos = ball.Position end
-				if not pos then return end
-				local zoomies = ball:FindFirstChild("zoomies")
-				local velocity = zoomies and zoomies.VectorVelocity or (ball:IsA("BasePart") and ball.AssemblyLinearVelocity)
-				if not velocity then return end
-				local fromBall = hrp.Position - pos
-				local dist = fromBall.Magnitude
-				local dot = fromBall.Magnitude > 0 and velocity.Unit:Dot(fromBall.Unit) or 0
-				if dot < -0.25 then untilAt = 0 end
-				if dist <= 18 and dot > -0.25 and os.clock() - lastAuto >= 0.2 then
-					lastAuto = os.clock()
-					pcall(ExecuteParry, SelectedParryType)
-				end
-			end)
-		end
 		local ballsFolder = Workspace2:FindFirstChild("Balls")
 		if ballsFolder then
 			ballsFolder.ChildRemoved:Connect(function()
