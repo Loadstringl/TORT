@@ -6393,8 +6393,7 @@ ParryCD = nil
 									child:SetAttribute("target", nil)
 								end)
 
-								-- ============================================================
--- OXY REMOTE PARRY (grafted from the oxy build)
+								-- OXY REMOTE PARRY (grafted from the oxy build)
 -- This build shipped without a parry remote and fell back to the F key.
 -- Here we capture the real 8-argument parry remote by hooking the
 -- FireServer/InvokeServer arguments, then replay it directly with a
@@ -6848,55 +6847,17 @@ do
 end
 
 do
-	local clampValue = function(v, lo, hi) return math.clamp(v, lo, hi) end
-	local minValue = math.min
-	local maxValue = math.max
-	local floorValue = math.floor
-	local toRadians = math.rad
-	local arcSin = math.asin
-	local helperFunction = function(a, b, t) return a + (b - a) * t end
-
-	local statsService = game:GetService("Stats")
-	local debris = game:GetService("Debris")
-	local dataPing = {
-		GetValue = function()
-			local ok, value = pcall(function()
-				local item = statsService.Network and statsService.Network.ServerStatsItem and statsService.Network.ServerStatsItem["Data Ping"]
-				return item and item:GetValue() or 0
-			end)
-			return ok and tonumber(value) or 0
-		end,
-	}
-
-	local balls = Workspace2:FindFirstChild("Balls")
-	local alive = Workspace2:FindFirstChild("Alive")
-	local name = localPlayer2.Name
-	local config = { accuracy = tonumber(getgenv().TORTParryAccuracy) or 100, spam_threshold = 3 }
-	local runtimeConnections = {}
-	local triggerbotState = { busy = false }
-	local logicokkCurveState = { AerodynamicTime = tick() }
-	local currentCamera = Workspace2.CurrentCamera
-
-	local ballState = {
-		state = { AerodynamicTime = tick(), LastWarping = tick(), LerpRadians = 0, Curving = tick() },
-		positions = setmetatable({}, { __mode = "k" }),
-		replicator = nil,
-	}
-	ballState.get = function()
-		if not balls then return nil end
-		for _, ball in ipairs(balls:GetChildren()) do
-			if ball:GetAttribute("realBall") then return ball end
-		end
-		return nil
+	local lastAuto = 0
+	local untilAt = 0
+	local function speedDivisor(speed)
+		return 2.2 + 0.9 * math.log(1 + speed / 80)
 	end
-	ballState.get_all = function()
-		local out = {}
-		if not balls then return out end
-		for _, ball in ipairs(balls:GetChildren()) do
-			if ball:GetAttribute("realBall") then out[#out + 1] = ball end
-		end
-		return out
+	local function speedMultiplier()
+		local accuracyValue = math.clamp(tonumber(getgenv().TORTParryAccuracy) or 100, 1, 100)
+		return 0.7 + (accuracyValue - 1) * 0.0035353535353535
 	end
+
+	local ballPositions = setmetatable({}, { __mode = "k" })
 	pcall(function()
 		local packages = RS:FindFirstChild("Packages")
 		local index = packages and packages:FindFirstChild("_Index")
@@ -6905,315 +6866,73 @@ do
 		if not net then return end
 		for _, child in ipairs(net:GetChildren()) do
 			if child:IsA("UnreliableRemoteEvent") and child.Name ~= "URE/ReplicateBallPosition" then
-				ballState.replicator = child
+				child.OnClientEvent:Connect(function(ball, position)
+					if ball and ball:GetAttribute("realBall") == true then ballPositions[ball] = position end
+				end)
 				break
 			end
 		end
 	end)
-	if ballState.replicator then
-		ballState.replicator.OnClientEvent:Connect(function(ball, position)
-			if ball and ball.Parent == balls and ball:GetAttribute("realBall") == true then
-				ballState.positions[ball] = position
-			end
-		end)
+
+	local function getRealBall()
+		local folder = Workspace2:FindFirstChild("Balls")
+		if not folder then return nil end
+		for _, ball in ipairs(folder:GetChildren()) do
+			if ball:GetAttribute("realBall") == true then return ball end
+		end
+		return nil
 	end
-	ballState.position = function(inputValue)
-		local ball = inputValue or ballState.get()
-		if ball then return ballState.positions[ball] or ball.Position end
-		return Vector3.zero
-	end
-	ballState.props = function()
-		local ball = ballState.get()
-		local hrp = localPlayer2.Character and localPlayer2.Character.PrimaryPart
-		if not ball or not hrp then return false end
-		local unit = (hrp.Position - ballState.position(ball)).Unit
-		return {
-			Velocity = Vector3.zero,
-			Direction = unit,
-			Distance = (hrp.Position - ballState.position(ball)).Magnitude,
-			Dot = unit:Dot(Vector3.zero.Unit),
-		}
-	end
-	ballState.bind = function(inputValue)
-		task.spawn(function()
-			if not inputValue:GetAttribute("realBall") and not inputValue:WaitForChild("zoomies", 3) then return end
-			inputValue:GetAttributeChangedSignal("target"):Connect(function()
-				parryState.debounce = false
-				parryState.until_at = 0
-			end)
-		end)
-	end
-	ballState.curved = function(inputValue)
-		local ball = inputValue or ballState.get()
-		if not ball then return false end
+
+	v85.PostSimulation:Connect(function()
+		if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
+		local now = os.clock()
+		if now < untilAt then return end
+		local ball = getRealBall()
+		if not ball then return end
 		local zoomies = ball:FindFirstChild("zoomies")
-		if not zoomies then return false end
-		local currentTick = tick()
-		local pingValue = dataPing:GetValue()
-		local vectorVelocity = zoomies.VectorVelocity
-		local vectorUnit = vectorVelocity.Unit
-		local hrp = localPlayer2.Character and localPlayer2.Character.PrimaryPart
-		if not hrp then return false end
-		local ballPosition = ballState.position(ball)
-		local toPlayer = (hrp.Position - ballPosition).Unit
-		local dot = toPlayer:Dot(vectorUnit)
-		local magnitude = vectorVelocity.Magnitude
-		local auxiliary = minValue(magnitude / 100, 40)
-		local calculationA = dot - toPlayer:Dot((vectorUnit - vectorVelocity).Unit)
-		local magnitude2 = (hrp.Position - ballPosition).Magnitude
-		local calculationB = 0.5 - pingValue / 1000
-		local calculationC = magnitude2 / magnitude - pingValue / 1000
-		local calculationD = 15 - minValue(magnitude2 / 1000, 15) + auxiliary
-		ballState.state.LerpRadians = helperFunction(ballState.state.LerpRadians, toRadians(arcSin(clampValue(dot, -1, 1))), 0.8)
-		if magnitude > 100 and calculationC > pingValue / 10 then
-			calculationD = maxValue(calculationD - 15, 15)
-		end
-		if magnitude2 < calculationD then return false end
-		if calculationA < calculationB then return true end
-		if ballState.state.LerpRadians < 0.018 then ballState.state.LastWarping = currentTick end
-		if currentTick - ballState.state.LastWarping < calculationC / 1.5 then return true end
-		if currentTick - ballState.state.Curving < calculationC / 1.5 then return true end
-		return dot < calculationB
-	end
-	if balls then
-		balls.ChildAdded:Connect(ballState.bind)
-		for _, ball in ipairs(balls:GetChildren()) do ballState.bind(ball) end
-	end
+		if not zoomies then return end
+		local ch = localPlayer2.Character
+		local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+		if not hrp then return end
 
-	local targetSelector = { current = nil, visited = {} }
-	targetSelector.by_mouse = function()
-		if not alive then return nil end
-		local list = {}
-		for _, ch in ipairs(alive:GetChildren()) do
-			if ch.Name ~= name and ch.PrimaryPart then list[#list + 1] = ch end
-		end
-		if #list == 0 then targetSelector.current = nil return nil end
-		local camera = currentCamera or Workspace2.CurrentCamera
-		if not camera then targetSelector.current = list[1] return list[1] end
-		local cf = camera.CFrame
-		local look = cf.LookVector
-		local direction = camera:ViewportPointToRay(camera.ViewportSize.X * 0.5, camera.ViewportSize.Y * 0.5).Direction
-		local bestDot = -math.huge
-		local picked = nil
-		for _, ch in ipairs(list) do
-			local rel = ch.PrimaryPart.Position - cf.Position
-			if rel.Magnitude > 0 then
-				local unit = rel.Unit
-				if look:Dot(unit) > 0 then
-					local score = direction:Dot(unit)
-					if bestDot < score then bestDot = score picked = ch end
-				end
-			end
-		end
-		picked = picked or list[1]
-		targetSelector.current = picked
-		return picked
-	end
-	targetSelector.closest = function() return targetSelector.by_mouse() end
-	targetSelector.props = function()
-		local current = targetSelector.current or targetSelector.closest()
-		if not current or not current.PrimaryPart then return false end
-		local hrp = localPlayer2.Character and localPlayer2.Character.PrimaryPart
-		if not hrp then return false end
-		return {
-			velocity = current.PrimaryPart.Velocity,
-			direction = (hrp.Position - current.PrimaryPart.Position).Unit,
-			distance = (hrp.Position - current.PrimaryPart.Position).Magnitude,
-		}
-	end
-
-	local curveController = { methods = {}, dropdown = nil, syncing = false }
-	curveController.get_cframe = function()
-		return (currentCamera or Workspace2.CurrentCamera or {}).CFrame or CFrame.new()
-	end
-
-	local parryController = { count = 0, first_signal = nil }
-	parryController.fire = function(inputValue)
-		targetSelector.by_mouse()
-		local okRemote, fired = false, false
-		if OxyParry and OxyParry.ready() then
-			okRemote, fired = pcall(OxyParry.fire)
-		end
-		if not (okRemote and fired) then
-			pcall(function() return OxyParry and OxyParry.directFire() end)
-		end
-		if parryController.count > 7 then return false end
-		parryController.count = parryController.count + 1
-		task.delay(0.5, function()
-			if parryController.count > 0 then parryController.count = parryController.count - 1 end
-		end)
-		return true
-	end
-
-	local function logicokkSpeedDivisor(speed)
-		return 2.2 + 0.9 * math.log(1 + speed / 80)
-	end
-	local function logicokkSpeedMultiplier()
-		local accuracyValue = math.clamp(tonumber(config.accuracy) or 100, 1, 100)
-		return 0.7 + (accuracyValue - 1) * 0.0035353535353535
-	end
-	local function logicokkCheckTornado(ball, nowValue)
-		local slash = ball:FindFirstChild("AeroDynamicSlashVFX")
-		if slash then
-			pcall(function() debris:AddItem(slash, 0) end)
-			logicokkCurveState.AerodynamicTime = nowValue
-			ballState.state.AerodynamicTime = nowValue
-		end
-		local runtime = localPlayer2.Character
-		local tornado = runtime and runtime:FindFirstChild("Tornado")
-		if tornado then
-			local tornadoTime = tornado:GetAttribute("TornadoTime") or 1
-			if nowValue - logicokkCurveState.AerodynamicTime < tornadoTime + 0.314159 then return true end
-		end
-		return false
-	end
-
-	local parryState = {
-		accuracy = config.accuracy,
-		ping_threshold = 25,
-		speed_divisor = 260,
-		speed_multiplier = 1,
-		debounce = false,
-		until_at = 0,
-		last_parry = 0,
-	}
-	parryState.check = function()
-		if triggerbotState.busy then return end
-		local character = localPlayer2.Character
-		character = character and character.PrimaryPart
-		if not character then return end
-		local humanoid = localPlayer2.Character and localPlayer2.Character:FindFirstChildOfClass("Humanoid")
-		if not humanoid or humanoid.Health <= 0 then return end
-		local nowValue = tick()
-		if parryState.debounce or nowValue < parryState.until_at then return end
-		local realBall = ballState.get()
-		local allBalls = ballState.get_all()
-		local realBallTarget = realBall and realBall:GetAttribute("target")
-		local pingMs = dataPing:GetValue() / 10
-		local pingThreshold = math.clamp(pingMs / 8, 4, 25)
-		local speedMultiplier = logicokkSpeedMultiplier()
-		for _, ball in allBalls do
-			if ball and ball.Parent then
-				local zoomies = ball:FindFirstChild("zoomies")
-				if zoomies then
-					local ballTarget = ball:GetAttribute("target")
-					local velocity = zoomies.VectorVelocity
-					local speed = velocity.Magnitude
-					local distance = (character.Position - ball.Position).Magnitude
-					local speedDivisor = logicokkSpeedDivisor(speed) * speedMultiplier
-					local speedFactor = 1
-					if speed > 200 then speedFactor = 1 + math.min((speed - 200) / 1000, 0.3) end
-					local targetDistance = pingThreshold + math.max(speed / speedDivisor, 9.5) * speedFactor
-					if not logicokkCheckTornado(ball, nowValue) then
-						local isCurving = ballState.curved(ball)
-						if not (realBallTarget == name and isCurving) then
-							if ballTarget == name and distance <= targetDistance then
-								if nowValue - (parryState.last_parry or 0) >= 0.2 then
-									parryController.fire()
-									parryState.last_parry = nowValue
-									parryState.debounce = true
-									parryState.until_at = nowValue + 1
-									return
-								end
-							end
-						end
-					end
-				end
-			end
-		end
-	end
-	parryState.set = function(autoParry)
-		config.auto_parry = autoParry
-		if autoParry then
-			runtimeConnections.auto_parry = v85.PostSimulation:Connect(function()
-				if System and System.__properties and System.__properties.__autoparry_enabled then parryState.check() end
-			end)
-		elseif runtimeConnections.auto_parry then
-			runtimeConnections.auto_parry:Disconnect()
-			runtimeConnections.auto_parry = nil
-		end
-	end
-
-	local spamController = { distance = 0, last_auto = 0, manual_on = false }
-	spamController.perform = function(inputValue)
-		local ball = ballState.get()
-		local current = targetSelector.current or targetSelector.closest()
-		if not ball or not current or not current.PrimaryPart then return false end
-		local velocity = ball.AssemblyLinearVelocity
+		local ballTarget = ball:GetAttribute("target")
+		local velocity = zoomies.VectorVelocity
 		local speed = velocity.Magnitude
-		local secondaryValue = (localPlayer2.Character.PrimaryPart.Position - ballState.position(ball)).Unit:Dot(velocity.Unit)
-		local tertiaryValue = localPlayer2:DistanceFromCharacter(current.PrimaryPart.Position)
-		local calculationA = inputValue.Ping + minValue(speed / 6, 95)
-		if inputValue.Entity_Properties.distance > calculationA then return spamController.distance end
-		if calculationA < inputValue.Ball_Properties.Distance then return spamController.distance end
-		if calculationA < tertiaryValue then return spamController.distance end
-		spamController.distance = calculationA - clampValue(secondaryValue, -1, 0) * (5 - minValue(speed / 5, 5))
-		return spamController.distance
-	end
-	spamController.auto_check = function()
-		local ball = ballState.get()
-		if not ball or not ball:FindFirstChild("zoomies") then return end
-		targetSelector.closest()
-		if not targetSelector.current or not targetSelector.current.PrimaryPart then return end
-		local secondaryValue = tick()
-		local threshold = spamController.perform({
-			Ball_Properties = ballState.props(),
-			Entity_Properties = targetSelector.props(),
-			Ping = clampValue(dataPing:GetValue() / 10, 1, 16),
-		})
-		local character = localPlayer2.Character
-		local primaryPart = character and character.PrimaryPart
-		if not primaryPart then return end
-		local magnitude = (primaryPart.Position - ballState.position(ball)).Magnitude
-		local attribute = ball:GetAttribute("target")
-		if not attribute then return end
-		local candidateValue = localPlayer2:DistanceFromCharacter(targetSelector.current.PrimaryPart.Position)
-		if candidateValue > threshold or magnitude > threshold then return end
-		if character:GetAttribute("Pulsed") then return end
-		if attribute == name and candidateValue > 30 and magnitude > 30 then return end
-		if magnitude <= threshold and parryController.count > config.spam_threshold and secondaryValue - spamController.last_auto >= 0.001 then
-			spamController.last_auto = secondaryValue
-			parryController.fire(true)
+		local pos = ballPositions[ball]
+		if not pos and tbl21.Ball_Position then pos = tbl21.Ball_Position(ball) end
+		if not pos and ball:IsA("BasePart") then pos = ball.Position end
+		if not pos then return end
+
+		local ping = 0
+		pcall(function()
+			local stat = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
+			if stat then ping = stat:GetValue() end
+		end)
+		local pingThreshold = math.clamp(ping / 80, 4, 25)
+		local distance = (hrp.Position - pos).Magnitude
+		local divisor = speedDivisor(speed) * speedMultiplier()
+		local speedFactor = 1
+		if speed > 200 then speedFactor = 1 + math.min((speed - 200) / 1000, 0.3) end
+		local targetDistance = pingThreshold + math.max(speed / divisor, 9.5) * speedFactor
+		local curving = ballTarget == localPlayer2.Name and ball:FindFirstChild("AeroDynamicSlashVFX") ~= nil
+
+		if not curving and ballTarget == localPlayer2.Name and distance <= targetDistance then
+			if now - lastAuto >= 0.2 then
+				lastAuto = now
+				untilAt = now + 1
+				pcall(ExecuteParry, SelectedParryType)
+			end
 		end
-	end
-	spamController.set_auto = function(autoSpam)
-		config.auto_spam = autoSpam
-		if autoSpam then
-			runtimeConnections.auto_spam = v85.PreSimulation:Connect(function()
-				if System and System.__properties and System.__properties.__auto_spam_enabled then spamController.auto_check() end
-			end)
-		elseif runtimeConnections.auto_spam then
-			runtimeConnections.auto_spam:Disconnect()
-			runtimeConnections.auto_spam = nil
-		end
-	end
-	spamController.set_manual = function(manualOn)
-		manualOn = manualOn == true
-		if spamController.manual_on == manualOn then return end
-		spamController.manual_on = manualOn
-		if runtimeConnections.manual_spam then runtimeConnections.manual_spam:Disconnect() runtimeConnections.manual_spam = nil end
-		if manualOn then
-			local lastValue = 0
-			runtimeConnections.manual_spam = v85.PreSimulation:Connect(function()
-				local secondaryValue = tick()
-				if secondaryValue - lastValue < 0.001 then return end
-				lastValue = secondaryValue
-				parryController.fire(true)
+	end)
+
+	pcall(function()
+		local ballsFolder = Workspace2:FindFirstChild("Balls")
+		if ballsFolder then
+			ballsFolder.ChildRemoved:Connect(function()
+				untilAt = 0
 			end)
 		end
-	end
-
-	ExecuteParry = function(_mode)
-		if v88:GetFocusedTextBox() then return false end
-		return parryController.fire(false)
-	end
-	ExecuteSpam = function(_mode)
-		if System and System.__properties and not System.__properties.__manual_spam_enabled then return false end
-		return parryController.fire(true)
-	end
-
-	parryState.set(true)
-	spamController.set_auto(true)
+	end)
 end
 
 								v87.Remotes.InfinityBall.OnClientEvent:Connect(function(arg, infinityActive)
