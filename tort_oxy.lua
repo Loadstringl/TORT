@@ -6859,9 +6859,10 @@ do
 	}
 	local minValue = math.min
 	local clampValue = math.clamp
+	local ws = workspace
 	local name = localPlayer2.Name
-	local balls = Workspace2:FindFirstChild("Balls")
-	local alive = Workspace2:FindFirstChild("Alive")
+	local balls = ws:FindFirstChild("Balls")
+	local alive = ws:FindFirstChild("Alive")
 	local config = { accuracy = tonumber(getgenv().TORTParryAccuracy) or 100, spam_threshold = 3 }
 
 	local ballPositions = setmetatable({}, { __mode = "k" })
