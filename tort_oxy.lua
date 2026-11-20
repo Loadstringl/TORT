@@ -6847,59 +6847,64 @@ end
 
 do
 	local lastAuto = 0
-	local lastBall = nil
-	local lastTarget = nil
-	v85.PreSimulation:Connect(function()
-		if not System or not System.__properties or not System.__properties.__autoparry_enabled then
-			return
-		end
+	local untilAt = 0
+	local function speedDivisor(speed)
+		return 2.2 + 0.9 * math.log(1 + speed / 80)
+	end
+	local function speedMultiplier()
+		local accuracyValue = math.clamp(tonumber(getgenv().TORTParryAccuracy) or 100, 1, 100)
+		return 0.7 + (accuracyValue - 1) * 0.0035353535353535
+	end
+
+	v85.PostSimulation:Connect(function()
+		if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
+		local now = os.clock()
+		if now < untilAt then return end
 		local ch = localPlayer2.Character
 		local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
 		if not hrp then return end
 
-		if lastBall then
-			local stillThreat = lastBall.Parent ~= nil and lastBall:GetAttribute("target") == lastTarget
-			if stillThreat and tbl21.Ball_Position then
-				local lastPos = tbl21.Ball_Position(lastBall)
-				if lastPos and (hrp.Position - lastPos).Magnitude > 50 then stillThreat = false end
-			end
-			if not stillThreat then lastBall = nil end
+		local realBall = tbl21 and tbl21.Get_Ball and tbl21.Get_Ball()
+		local realTarget = realBall and realBall:GetAttribute("target")
+		local ping = 0
+		pcall(function()
+			local stat = RS.Network and RS.Network.ServerStatsItem and RS.Network.ServerStatsItem["Data Ping"]
+			if stat then ping = stat:GetValue() end
+		end)
+		if ping == 0 then
+			pcall(function()
+				local stat = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
+				if stat then ping = stat:GetValue() end
+			end)
 		end
-
+		local pingThreshold = math.clamp(ping / 80, 4, 25)
+		local multiplier = speedMultiplier()
 		local balls = tbl21 and tbl21.Get_Balls and tbl21.Get_Balls() or {}
+
 		for _, ball in pairs(balls) do
-			local target = ball and ball:GetAttribute("target")
-			local aimedAtUs = target == localPlayer2.Name
-			if ball ~= lastBall and (aimedAtUs or target == nil) then
-				local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
-				if not pos and ball:IsA("BasePart") then pos = ball.Position end
-				if pos then
-					local dist = (hrp.Position - pos).Magnitude
-					local toward = true
-					local velocity = nil
-					local zoomies = ball:FindFirstChild("zoomies")
-					if zoomies and zoomies.VectorVelocity then
-						velocity = zoomies.VectorVelocity
-					elseif ball:IsA("BasePart") then
-						velocity = ball.AssemblyLinearVelocity
-					end
-					local speed = 0
-					if velocity then
-						speed = velocity.Magnitude
-						local toPlayer = hrp.Position - pos
-						if speed > 0 and toPlayer.Magnitude > 0 then
-							toward = velocity.Unit:Dot(toPlayer.Unit) > (aimedAtUs and -0.2 or 0.35)
+			if ball and ball.Parent then
+				local zoomies = ball:FindFirstChild("zoomies")
+				if zoomies then
+					local ballTarget = ball:GetAttribute("target")
+					local velocity = zoomies.VectorVelocity
+					local speed = velocity.Magnitude
+					local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
+					if not pos and ball:IsA("BasePart") then pos = ball.Position end
+					if pos then
+						local distance = (hrp.Position - pos).Magnitude
+						local divisor = speedDivisor(speed) * multiplier
+						local speedFactor = 1
+						if speed > 200 then speedFactor = 1 + math.min((speed - 200) / 1000, 0.3) end
+						local targetDistance = pingThreshold + math.max(speed / divisor, 9.5) * speedFactor
+						local curving = realTarget == localPlayer2.Name and ball:FindFirstChild("AeroDynamicSlashVFX") ~= nil
+						if not curving and ballTarget == localPlayer2.Name and distance <= targetDistance then
+							if now - lastAuto >= 0.2 then
+								lastAuto = now
+								untilAt = now + 1
+								pcall(ExecuteParry, SelectedParryType)
+								return
+							end
 						end
-					end
-					local impact = speed > 1 and (dist / speed) or 99
-					local reach = aimedAtUs and 46 or 22
-					if (dist <= reach or impact <= 0.18) and (toward or dist <= 16)
-						and os.clock() - lastAuto >= 0.08 then
-						lastAuto = os.clock()
-						lastBall = ball
-						lastTarget = target
-						pcall(ExecuteParry, SelectedParryType)
-						break
 					end
 				end
 			end
@@ -6909,29 +6914,37 @@ do
 	pcall(function()
 		local remotes = RS:FindFirstChild("Remotes")
 		local successAll = remotes and remotes:FindFirstChild("ParrySuccessAll")
-		if not successAll then return end
-		successAll.OnClientEvent:Connect(function(_, source)
-			if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
-			if source and source.Parent and source.Parent ~= lp2.Character and source.Parent.Parent ~= workspace:FindFirstChild("Alive") then return end
-			local ch = lp2.Character
-			local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
-			if not hrp then return end
-			local ball = tbl21 and tbl21.Get_Ball and tbl21.Get_Ball()
-			if not ball then return end
-			local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
-			if not pos and ball:IsA("BasePart") then pos = ball.Position end
-			if not pos then return end
-			local zoomies = ball:FindFirstChild("zoomies")
-			local velocity = zoomies and zoomies.VectorVelocity or (ball:IsA("BasePart") and ball.AssemblyLinearVelocity)
-			if not velocity then return end
-			local fromBall = hrp.Position - pos
-			local dist = fromBall.Magnitude
-			local dot = fromBall.Magnitude > 0 and velocity.Unit:Dot(fromBall.Unit) or 0
-			if dist <= 18 and dot > -0.25 and os.clock() - lastAuto >= 0.04 then
-				lastAuto = os.clock()
-				pcall(ExecuteParry, SelectedParryType)
-			end
-		end)
+		if successAll then
+			successAll.OnClientEvent:Connect(function(_, source)
+				untilAt = 0
+				if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
+				if source and source.Parent and source.Parent ~= lp2.Character and source.Parent.Parent ~= Workspace2:FindFirstChild("Alive") then return end
+				local ch = lp2.Character
+				local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
+				if not hrp then return end
+				local ball = tbl21 and tbl21.Get_Ball and tbl21.Get_Ball()
+				if not ball then return end
+				local pos = tbl21.Ball_Position and tbl21.Ball_Position(ball)
+				if not pos and ball:IsA("BasePart") then pos = ball.Position end
+				if not pos then return end
+				local zoomies = ball:FindFirstChild("zoomies")
+				local velocity = zoomies and zoomies.VectorVelocity or (ball:IsA("BasePart") and ball.AssemblyLinearVelocity)
+				if not velocity then return end
+				local fromBall = hrp.Position - pos
+				local dist = fromBall.Magnitude
+				local dot = fromBall.Magnitude > 0 and velocity.Unit:Dot(fromBall.Unit) or 0
+				if dist <= 18 and dot > -0.25 and os.clock() - lastAuto >= 0.04 then
+					lastAuto = os.clock()
+					pcall(ExecuteParry, SelectedParryType)
+				end
+			end)
+		end
+		local ballsFolder = Workspace2:FindFirstChild("Balls")
+		if ballsFolder then
+			ballsFolder.ChildRemoved:Connect(function()
+				untilAt = 0
+			end)
+		end
 	end)
 end
 
