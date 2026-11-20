@@ -6883,7 +6883,7 @@ do
 		boundBalls[ball] = true
 		pcall(function()
 			ball:GetAttributeChangedSignal("target"):Connect(function()
-				untilAt = 0
+				if ball:GetAttribute("target") ~= localPlayer2.Name then untilAt = 0 end
 			end)
 		end)
 	end
@@ -6959,7 +6959,6 @@ do
 		local successAll = remotes and remotes:FindFirstChild("ParrySuccessAll")
 		if successAll then
 			successAll.OnClientEvent:Connect(function(_, source)
-				untilAt = 0
 				if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
 				if source and source.Parent and source.Parent ~= lp2.Character and source.Parent.Parent ~= Workspace2:FindFirstChild("Alive") then return end
 				local ch = lp2.Character
@@ -6977,7 +6976,8 @@ do
 				local fromBall = hrp.Position - pos
 				local dist = fromBall.Magnitude
 				local dot = fromBall.Magnitude > 0 and velocity.Unit:Dot(fromBall.Unit) or 0
-				if dist <= 18 and dot > -0.25 and os.clock() - lastAuto >= 0.04 then
+				if dot < -0.25 then untilAt = 0 end
+				if dist <= 18 and dot > -0.25 and os.clock() - lastAuto >= 0.2 then
 					lastAuto = os.clock()
 					pcall(ExecuteParry, SelectedParryType)
 				end
