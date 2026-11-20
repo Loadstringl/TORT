@@ -6996,7 +6996,7 @@ do
 		return picked
 	end
 
-	local parryState = { debounce = false, until_at = 0, last_parry = 0 }
+	local parryState = { debounce = false, until_at = 0, last_parry = 0, pendingBall = nil, lastCheck = 0 }
 	local function rearm()
 		parryState.debounce = false
 		parryState.until_at = 0
@@ -7012,11 +7012,17 @@ do
 	end
 	parryState.check = function()
 		if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
+		local nowCheck = os.clock()
+		if nowCheck - parryState.lastCheck < 0.008 then return end
+		parryState.lastCheck = nowCheck
 		local _, hrp, hum = getChar()
 		if not hrp or not hum or hum.Health <= 0 then return end
-		local nowValue = os.clock()
-		if parryState.debounce or nowValue < parryState.until_at then return end
-		local ball = getBall()
+		if parryState.debounce or nowCheck < parryState.until_at then return end
+		local ball = parryState.pendingBall
+		if not ball or not ball.Parent or ball:GetAttribute("target") ~= name then
+			ball = getBall()
+			parryState.pendingBall = nil
+		end
 		if not ball or not ball.Parent then return end
 		local zoomies = zoomiesCache[ball]
 		if zoomies == nil then
@@ -7034,18 +7040,31 @@ do
 		local speedFactor = 1
 		if speed > 180 then speedFactor = 1 + math.min((speed - 180) / 900, 0.32) end
 		local targetDistance = pingThreshold + math.max(speed / divisor, 11) * speedFactor
-		if distance <= targetDistance then fireNow(false) end
+		if distance <= targetDistance then
+			parryState.pendingBall = nil
+			fireNow(false)
+		end
 	end
 
 	pcall(function()
 		v85.PostSimulation:Connect(function() parryState.check() end)
 	end)
 	pcall(function()
+		v85.PreSimulation:Connect(function() parryState.check() end)
+	end)
+	pcall(function()
+		game:GetService("RunService").Heartbeat:Connect(function() parryState.check() end)
+	end)
+	pcall(function()
 		if not balls then return end
 		local function bindBall(ball)
 			if not ball then return end
 			ball:GetAttributeChangedSignal("target"):Connect(function()
-				if ball:GetAttribute("target") == name then fireNow(true) end
+				if ball:GetAttribute("target") == name then
+					parryState.pendingBall = ball
+				elseif parryState.pendingBall == ball then
+					parryState.pendingBall = nil
+				end
 				rearm()
 			end)
 		end
