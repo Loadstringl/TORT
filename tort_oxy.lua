@@ -6633,6 +6633,7 @@ local OxyParry = (function()
 	local firstSignal = nil
 	local fastArgs = nil
 	local fastArgsAt = 0
+	local fastPacket = nil
 	getgenv().TORTParryStats = getgenv().TORTParryStats or { direct = 0, remote = 0 }
 
 	local animCache = {}
@@ -6808,37 +6809,56 @@ local OxyParry = (function()
 		return ok
 	end
 
-	function api.fastFire()
+	local function getFastPacket()
 		local now = os.clock()
-		if now - state.last < 0.001 then return false end
 		ensureHook()
-		if next(state.captured) == nil then return false end
+		if next(state.captured) == nil then return nil end
 		if type(state.token_fn) ~= "function" then findToken() end
-		if type(state.token_fn) ~= "function" then return false end
+		if type(state.token_fn) ~= "function" then return nil end
+		local remote, captured = next(state.captured)
+		if not remote or not captured then return nil end
+		local sec = tostring(math.floor(Workspace2:GetServerTimeNow() * 100))
+		if fastPacket and fastPacket.sec == sec then return fastPacket end
 		if not fastArgs or now - fastArgsAt > 0.25 then
 			local curve, targets, coords = buildArgs()
-			if not curve then return false end
+			if not curve then return nil end
 			fastArgs = { curve, targets, coords }
 			fastArgsAt = now
 		end
-		local fired = false
-		for remote, captured in pairs(state.captured) do
-			local seed = captured[2]
-			local token = polygon(seed)
-			if token then
-				local args = { captured[1], seed, token, 0.5, fastArgs[1], fastArgs[2], fastArgs[3], false }
-				local ok
-				if remote:IsA("RemoteEvent") then
-					ok = pcall(function() remote:FireServer(unpack2(args)) end)
-				elseif remote:IsA("RemoteFunction") then
-					ok = pcall(function() remote:InvokeServer(unpack2(args)) end)
-				end
-				if ok then fired = true end
+		local token = polygon(captured[2])
+		if not token then return nil end
+		fastPacket = {
+			sec = sec,
+			remote = remote,
+			args = { captured[1], captured[2], token, 0.5, fastArgs[1], fastArgs[2], fastArgs[3], false },
+		}
+		return fastPacket
+	end
+
+	function api.fastFire(noGate)
+		local now = os.clock()
+		if not noGate and now - state.last < 0.001 then return false end
+		local packet = getFastPacket()
+		if not packet then return false end
+		local ok = pcall(function()
+			if packet.remote:IsA("RemoteEvent") then
+				packet.remote:FireServer(unpack2(packet.args))
+			elseif packet.remote:IsA("RemoteFunction") then
+				packet.remote:InvokeServer(unpack2(packet.args))
 			end
-		end
-		if fired then
+		end)
+		if ok then
 			state.last = now
 			getgenv().TORTParryStats.remote = getgenv().TORTParryStats.remote + 1
+		end
+		return ok
+	end
+
+	function api.fastBurst(count)
+		pcall(prepareParry)
+		local fired = 0
+		for _ = 1, count do
+			if api.fastFire(true) then fired += 1 end
 		end
 		return fired
 	end
@@ -6880,8 +6900,8 @@ do
 	end
 	ExecuteSpam = function(_mode)
 		if v88:GetFocusedTextBox() then return false end
-		local okFast, fired = pcall(OxyParry.fastFire)
-		if okFast and fired then return true end
+		local okFast, fired = pcall(OxyParry.fastBurst, 16)
+		if okFast and fired and fired > 0 then return true end
 		local okRemote, fired = pcall(OxyParry.fire)
 		if okRemote and fired then return true end
 		local okDirect, fired = pcall(OxyParry.directFire)
@@ -7001,6 +7021,27 @@ do
 		parryState.debounce = false
 		parryState.until_at = 0
 	end
+	local function hardReset()
+		rearm()
+		parryState.pendingBall = nil
+		parryState.last_parry = 0
+		parryState.lastCheck = 0
+		targetRef = nil
+		zoomiesCache = setmetatable({}, { __mode = "k" })
+	end
+	local function watchCharacter(ch)
+		if not ch then return end
+		local hum = ch:FindFirstChildOfClass("Humanoid")
+		if hum then hum.Died:Connect(hardReset) end
+	end
+	pcall(function()
+		watchCharacter(localPlayer2.Character)
+		localPlayer2.CharacterAdded:Connect(function(ch)
+			charRef, hrpRef, humRef = nil, nil, nil
+			hardReset()
+			watchCharacter(ch)
+		end)
+	end)
 	local function fireNow(immediate)
 		local nowValue = os.clock()
 		local gate = immediate and 0.04 or 0.07
@@ -7022,6 +7063,7 @@ do
 		if not ball or not ball.Parent or ball:GetAttribute("target") ~= name then
 			ball = getBall()
 			parryState.pendingBall = nil
+			if nowCheck - parryState.last_parry > 0.5 then rearm() end
 		end
 		if not ball or not ball.Parent then return end
 		local zoomies = zoomiesCache[ball]
@@ -7130,7 +7172,7 @@ do
 		if candidateValue > threshold or magnitude > threshold then return end
 		if ch and ch:GetAttribute("Pulsed") then return end
 		if attribute == name and candidateValue > 30 and magnitude > 30 then return end
-		if nowValue - spamController.last_auto >= 0.001 then
+		if nowValue - spamController.last_auto >= 0.008 then
 			spamController.last_auto = nowValue
 			pcall(ExecuteSpam, SelectedParryType)
 		end
