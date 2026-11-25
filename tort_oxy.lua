@@ -12,7 +12,7 @@ getgenv().TriggerbotKeypress = false
 getgenv().TORT_UI_READY = false
 getgenv().TORT_VIDEO_ASSET = getgenv().TORT_VIDEO_ASSET or "5608384572"
 getgenv().TORT_MUSIC_ASSET = getgenv().TORT_MUSIC_ASSET or "126132092368935"
-getgenv().TORT_ART_ASSET = getgenv().TORT_ART_ASSET or "5252447904"
+getgenv().TORT_ART_ASSET = getgenv().TORT_ART_ASSET or "9242918232"
 getgenv().TORT_SPAM_BURST = getgenv().TORT_SPAM_BURST or 4
 getgenv().TORT_SPAM_INTERVAL = getgenv().TORT_SPAM_INTERVAL or 0.012
 getgenv().TORT_LITE_MODE = getgenv().TORT_LITE_MODE or false
@@ -1059,7 +1059,7 @@ index._connections = obj2
 												bgFx.Parent = frame
 												local animeFallback = Instance.new("ImageLabel")
 												animeFallback.Name = "AnimeArtFallback"
-												animeFallback.Image = "rbxassetid://3241672653"
+												animeFallback.Image = "rbxassetid://11426233172"
 												animeFallback.Size = UDim2.fromScale(1, 1)
 												animeFallback.BackgroundTransparency = 1
 												animeFallback.BorderSizePixel = 0
@@ -1069,7 +1069,7 @@ index._connections = obj2
 												animeFallback.Active = false
 												animeFallback.Selectable = false
 												animeFallback.Parent = bgFx
-												local artAsset = getgenv().TORT_ART_ASSET or "5252447904"
+												local artAsset = getgenv().TORT_ART_ASSET or "9242918232"
 												local animeArt = Instance.new("ImageLabel")
 												animeArt.Name = "AnimeArt"
 												animeArt.Image = (tonumber(artAsset) and ("rbxassetid://" .. artAsset)) or artAsset
@@ -7240,37 +7240,33 @@ do
 		if not hrp or not hum or hum.Health <= 0 then return end
 		if nowCheck < parryState.until_at then return end
 		if parryState.debounce then parryState.debounce = false end
-		local ball = parryState.pendingBall
-		if not ball or not ball.Parent or ball:GetAttribute("target") ~= name then
-			ball = getBall()
-			parryState.pendingBall = nil
-		end
-		if not ball or not ball.Parent then return end
-		if ball:GetAttribute("target") ~= name then return end
-		local zoomies = getZoomies(ball)
-		if not zoomies then return end
-		local pos = ballPosition(ball)
-		if not pos then return end
-		local velocity = zoomies.VectorVelocity
-		local speed = velocity.Magnitude
-		if speed < 15 then return end
-		local rel = hrp.Position - pos
-		local distance = rel.Magnitude
-		if distance > 90 then return end
-		local vdir = velocity / speed
-		local along = rel:Dot(vdir)
-		if along <= 0 then return end
-		local lateral = math.sqrt(math.max(distance * distance - along * along, 0))
-		if lateral > 7 then return end
-		local approach = velocity:Dot(rel / math.max(distance, 0.001))
-		if approach <= 0 then return end
-		local tti = (distance - 3.2) / approach
-		local accuracy = clampValue(tonumber(config.accuracy) or 100, 1, 100)
-		local window = 0.07 + (100 - accuracy) * 0.0008
-		local lead = clampValue(0.03 + pingValue() / 2000, 0.03, 0.14)
-		if tti <= lead + window and tti >= -0.15 then
-			parryState.pendingBall = nil
-			fireNow(false)
+		if nowCheck - parryState.last_parry < 0.18 then return end
+		local pingThreshold = clampValue(pingValue() / 80, 4, 22)
+		local multiplier = speedMultiplier()
+		local candidates = balls and balls:GetChildren() or ballCache
+		for _, ball in ipairs(candidates) do
+			if ball and ball.Parent and ball:GetAttribute("target") == name then
+				local zoomies = getZoomies(ball)
+				if zoomies then
+					local pos = ballPosition(ball)
+					if pos then
+						local velocity = zoomies.VectorVelocity
+						local speed = velocity.Magnitude
+						local rel = hrp.Position - pos
+						local distance = rel.Magnitude
+						local divisor = speedDivisor(speed) * multiplier
+						local targetDistance = pingThreshold + math.max(speed / divisor, 9.5)
+						if distance <= targetDistance then
+							local approach = speed > 0 and velocity:Dot(rel / math.max(distance, 0.001)) or 0
+							if approach > -speed * 0.35 then
+								parryState.pendingBall = nil
+								fireNow(false)
+								return
+							end
+						end
+					end
+				end
+			end
 		end
 	end
 
