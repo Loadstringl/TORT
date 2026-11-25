@@ -4032,6 +4032,71 @@ end)
 
 									do
 										v84 = index.new()
+									getgenv().TORT_DISCORD_URL = getgenv().TORT_DISCORD_URL or "https://discord.gg/EAF5Z38JN"
+									Home = v84:create_tab("Home", "rbxassetid://76499042599127")
+									Updated = v84:create_tab("Updated", "rbxassetid://10734951847")
+									do
+										local discordUrl = getgenv().TORT_DISCORD_URL
+										local function copyDiscord()
+											local copied = false
+											if type(setclipboard) == "function" then
+												copied = pcall(setclipboard, discordUrl)
+											end
+											if not copied and type(setrbxclipboard) == "function" then
+												copied = pcall(setrbxclipboard, discordUrl)
+											end
+											pcall(index.SendNotification, {
+												title = "Discord",
+												text = copied and "Invite copied to clipboard" or discordUrl,
+												duration = 4,
+											})
+										end
+										local homeCard = Home:create_module({
+											title = "Home",
+											description = "TORT home / links",
+											section = "left",
+											flag = "TORT_HOME_OPEN",
+											callback = function() end,
+										})
+										homeCard:create_paragraph({
+											title = "TORT",
+											text = "Home / links / updates",
+											customScale = 70,
+										})
+										homeCard:create_paragraph({
+											title = "Discord",
+											text = discordUrl,
+											customScale = 70,
+										})
+										homeCard:create_feature({
+											history = true,
+											title = "Discord",
+											subtitle = discordUrl,
+											image = "rbxassetid://10734966447",
+											button_callback = copyDiscord,
+										})
+										homeCard:change_state(true)
+									end
+									do
+										local updateCard = Updated:create_module({
+											title = "Updated",
+											description = "TORT changelog",
+											section = "left",
+											flag = "TORT_UPDATED_OPEN",
+											callback = function() end,
+										})
+										updateCard:create_paragraph({
+											title = "Latest update",
+											text = "Home + Updated tabs added\nDiscord invite added with copy button\nAuto Parry restored to reference-style target/distance check\nAnime art changed to Gojo / Nezuko\nIntro/video/music restored; startup scan loops removed",
+											customScale = 150,
+										})
+										updateCard:create_paragraph({
+											title = "Older",
+											text = "Public rbxasset IDs for video, music, parry SFX and animation\nSingle PreSimulation loop for parry/spam; lighter mobile performance",
+											customScale = 100,
+										})
+										updateCard:change_state(true)
+									end
 										Combat = v84:create_tab("Combat", "rbxassetid://76499042599127")
 										Detection = v84:create_tab("Detection", "rbxassetid://10734951847")
 										Misc = v84:create_tab("Misc", "rbxassetid://10734887784")
