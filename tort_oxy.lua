@@ -15,9 +15,7 @@ getgenv().TORT_MUSIC_ASSET = getgenv().TORT_MUSIC_ASSET or "126132092368935"
 getgenv().TORT_ART_ASSET = getgenv().TORT_ART_ASSET or "5252447904"
 getgenv().TORT_SPAM_BURST = getgenv().TORT_SPAM_BURST or 4
 getgenv().TORT_SPAM_INTERVAL = getgenv().TORT_SPAM_INTERVAL or 0.012
-if getgenv().TORT_LITE_MODE == nil then
-    getgenv().TORT_LITE_MODE = game:GetService("UserInputService").TouchEnabled
-end
+getgenv().TORT_LITE_MODE = getgenv().TORT_LITE_MODE or false
 
 -- ============================================================
 -- TORT loading animation
@@ -76,22 +74,20 @@ pcall(function()
     end)
 
     local loadVideo = nil
-    if not getgenv().TORT_LITE_MODE then
-        pcall(function()
-            loadVideo = Instance.new("VideoFrame")
-            loadVideo.Size = UDim2.fromScale(1, 1)
-            loadVideo.BackgroundTransparency = 1
-            loadVideo.Video = mediaSource("https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/t.mp4", getgenv().TORT_VIDEO_ASSET)
-            loadVideo.Looped = true
-            loadVideo.Volume = 0
-            loadVideo.Parent = bg
-            loadVideo.Playing = true
-            loadVideo.Loaded:Connect(function()
-                pcall(function() loadVideo:Play() end)
-            end)
+    pcall(function()
+        loadVideo = Instance.new("VideoFrame")
+        loadVideo.Size = UDim2.fromScale(1, 1)
+        loadVideo.BackgroundTransparency = 1
+        loadVideo.Video = mediaSource("https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/t.mp4", getgenv().TORT_VIDEO_ASSET)
+        loadVideo.Looped = true
+        loadVideo.Volume = 0
+        loadVideo.Parent = bg
+        loadVideo.Playing = true
+        loadVideo.Loaded:Connect(function()
             pcall(function() loadVideo:Play() end)
         end)
-    end
+        pcall(function() loadVideo:Play() end)
+    end)
 
     local loadSound = nil
     pcall(function()
@@ -6555,11 +6551,7 @@ local OxyParry = (function()
 		if type(state.token_fn) == "function" then return true end
 		local nowToken = os.clock()
 		if nowToken - bootAt < 2.5 then return false end
-		if tokenScanDone and nowToken - tokenSearchedAt < 5 then return false end
-		if tokenScanDone then
-			tokenScanDone = false
-			tokenScanList = nil
-		end
+		if tokenScanDone then return false end
 		if not tokenScanList then
 			if type(getgc2) ~= "function" then return false end
 			tokenScanList = getgc2(true)
@@ -6598,12 +6590,6 @@ local OxyParry = (function()
 		end
 		return false
 	end
-	task.spawn(function()
-		while type(state.token_fn) ~= "function" do
-			findToken()
-			task.wait(0.15)
-		end
-	end)
 
 	local function polygon(seed)
 		if type(state.token_fn) ~= "function" then findToken() end
@@ -6687,11 +6673,7 @@ local OxyParry = (function()
 		if next(state.captured) ~= nil then return end
 		local nowHook = os.clock()
 		if nowHook - bootAt < 2.5 then return end
-		if hookDone and nowHook - hookScannedAt < 2 then return end
-		if hookDone then
-			hookDone = false
-			hookList = nil
-		end
+		if hookDone then return end
 		if not hookList then
 			local okList, list = pcall(function() return RS:GetDescendants() end)
 			if not okList or type(list) ~= "table" then return end
@@ -6720,12 +6702,6 @@ local OxyParry = (function()
 			hookList = nil
 		end
 	end
-	task.spawn(function()
-		while next(state.captured) == nil do
-			ensureHook()
-			task.wait(0.15)
-		end
-	end)
 
 	local function buildArgs()
 		local cam = Workspace2.CurrentCamera
@@ -6841,6 +6817,20 @@ local OxyParry = (function()
 		animCache[animType] = anim
 		return anim
 	end
+	task.spawn(function()
+		task.wait(3)
+		pcall(function()
+			local ch = lp2.Character
+			local swordName = ch and ch:GetAttribute("CurrentlyEquippedSword")
+			if not swordName then return end
+			local shared = RS:FindFirstChild("Shared")
+			local swords = shared and shared:FindFirstChild("ReplicatedInstances")
+			local getSword = swords and swords:FindFirstChild("Swords") and swords.Swords:FindFirstChild("GetSword")
+			if not getSword then return end
+			local ok, info = pcall(function() return getSword:Invoke(swordName) end)
+			if ok and info and info.AnimationType then swordTypeCache[swordName] = info.AnimationType end
+		end)
+	end)
 
 	local function prepareParry()
 		playParrySfx()
@@ -6851,19 +6841,8 @@ local OxyParry = (function()
 			if not ch or not animator then return end
 
 			local animType = "Single"
-			local shared = RS:FindFirstChild("Shared")
-			local swords = shared and shared:FindFirstChild("ReplicatedInstances")
-			local getSword = swords and swords:FindFirstChild("Swords") and swords.Swords:FindFirstChild("GetSword")
 			local swordName = ch:GetAttribute("CurrentlyEquippedSword") or "Base Sword"
-			if swordTypeCache[swordName] then
-				animType = swordTypeCache[swordName]
-			elseif getSword then
-				local ok, info = pcall(function() return getSword:Invoke(swordName) end)
-				if ok and info and info.AnimationType then
-					animType = info.AnimationType
-					swordTypeCache[swordName] = animType
-				end
-			end
+			if swordTypeCache[swordName] then animType = swordTypeCache[swordName] end
 
 			local anim = findGrabAnim(animType)
 			local fallbackAnim = false
@@ -7000,9 +6979,7 @@ local OxyParry = (function()
 
 	local function getFastPacket()
 		local now = os.clock()
-		ensureHook()
 		if next(state.captured) == nil then return nil end
-		if type(state.token_fn) ~= "function" then findToken() end
 		if type(state.token_fn) ~= "function" then return nil end
 		local remote, captured = next(state.captured)
 		if not remote or not captured then return nil end
@@ -7044,8 +7021,6 @@ local OxyParry = (function()
 	end
 
 	function api.fastBurst(count)
-		if type(state.token_fn) ~= "function" then findToken() end
-		pcall(ensureHook)
 		local fired = 0
 		for _ = 1, count do
 			if api.fastFire(false) then fired += 1 end
