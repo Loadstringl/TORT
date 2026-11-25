@@ -12,6 +12,12 @@ getgenv().TriggerbotKeypress = false
 getgenv().TORT_UI_READY = false
 getgenv().TORT_VIDEO_ASSET = getgenv().TORT_VIDEO_ASSET or "5608384572"
 getgenv().TORT_MUSIC_ASSET = getgenv().TORT_MUSIC_ASSET or "126132092368935"
+getgenv().TORT_ART_ASSET = getgenv().TORT_ART_ASSET or "5252447904"
+getgenv().TORT_SPAM_BURST = getgenv().TORT_SPAM_BURST or 4
+getgenv().TORT_SPAM_INTERVAL = getgenv().TORT_SPAM_INTERVAL or 0.012
+if getgenv().TORT_LITE_MODE == nil then
+    getgenv().TORT_LITE_MODE = game:GetService("UserInputService").TouchEnabled
+end
 
 -- ============================================================
 -- TORT loading animation
@@ -1044,6 +1050,20 @@ index._connections = obj2
 												bgFx.BorderSizePixel = 0
 												bgFx.ZIndex = 0
 												bgFx.Parent = frame
+												local artAsset = getgenv().TORT_ART_ASSET or "5252447904"
+												local animeArt = Instance.new("ImageLabel")
+												animeArt.Name = "AnimeArt"
+												animeArt.Image = (tonumber(artAsset) and ("rbxassetid://" .. artAsset)) or artAsset
+												animeArt.Size = UDim2.fromScale(1, 1)
+												animeArt.Position = UDim2.fromScale(0, 0)
+												animeArt.BackgroundTransparency = 1
+												animeArt.BorderSizePixel = 0
+												animeArt.ImageTransparency = 0.72
+												animeArt.ScaleType = Enum.ScaleType.Crop
+												animeArt.ZIndex = 0
+												animeArt.Active = false
+												animeArt.Selectable = false
+												animeArt.Parent = bgFx
 												local bgGrad = Instance.new("UIGradient")
 												bgGrad.Color = ColorSequence.new({
 													ColorSequenceKeypoint.new(0, Color3.fromRGB(60, 20, 95)),
@@ -1054,6 +1074,7 @@ index._connections = obj2
 												bgGrad.Rotation = 0
 												bgGrad.Parent = bgFx
 												task.spawn(function()
+													if getgenv().TORT_LITE_MODE then return end
 													while not getgenv().TORT_UI_READY do task.wait(0.2) end
 													while bgFx.Parent do
 														bgGrad.Rotation = 0
@@ -1074,6 +1095,7 @@ index._connections = obj2
 													dot.Position = UDim2.new(math.random(0, 90) / 100, 0, math.random(0, 90) / 100, 0)
 													dot.Parent = bgFx
 													task.spawn(function()
+														if getgenv().TORT_LITE_MODE then return end
 														while not getgenv().TORT_UI_READY do task.wait(0.2) end
 														while dot.Parent do
 															local duration = math.random(25, 55) / 10
@@ -1094,6 +1116,7 @@ index._connections = obj2
 												scanline.ZIndex = 0
 												scanline.Parent = bgFx
 												task.spawn(function()
+													if getgenv().TORT_LITE_MODE then return end
 													while not getgenv().TORT_UI_READY do task.wait(0.2) end
 													while scanline.Parent do
 														scanline.Position = UDim2.fromScale(0, 0)
@@ -1119,6 +1142,7 @@ index._connections = obj2
 												stripeGrad.Rotation = 35
 												stripeGrad.Parent = stripeGradFrame
 												task.spawn(function()
+													if getgenv().TORT_LITE_MODE then return end
 													while not getgenv().TORT_UI_READY do task.wait(0.2) end
 													while stripeGrad.Parent do
 														stripeGrad.Offset = Vector2.new(-1, 0)
@@ -1139,6 +1163,7 @@ index._connections = obj2
 												glowGrad.Transparency = NumberSequence.new(0.88)
 												glowGrad.Parent = glowFx
 												task.spawn(function()
+													if getgenv().TORT_LITE_MODE then return end
 													while not getgenv().TORT_UI_READY do task.wait(0.2) end
 													while glowFx.Parent do
 														TweenService:Create(glowFx, TweenInfo.new(1.6, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut), { BackgroundTransparency = 0.84 }):Play()
@@ -6497,11 +6522,12 @@ local OxyParry = (function()
 		end
 	end)
 
-	local tokenSearched = false
+	local tokenSearchedAt = 0
 	local function findToken()
 		if type(state.token_fn) == "function" then return true end
-		if tokenSearched then return false end
-		tokenSearched = true
+		local nowToken = os.clock()
+		if nowToken - tokenSearchedAt < 5 then return false end
+		tokenSearchedAt = nowToken
 		if type(getgc2) ~= "function" then return false end
 		local gc = getgc2(true)
 		if type(gc) ~= "table" then return false end
@@ -6513,12 +6539,14 @@ local OxyParry = (function()
 					if okUp and type(ups) == "table" then
 						for _, u in pairs(ups) do
 							if type(u) == "function" then
-								state.token_fn = u
-								break
+								local okTest, testValue = pcall(u, 123, "TIME")
+								if okTest and type(testValue) == "string" and #testValue > 0 then
+									state.token_fn = u
+									return true
+								end
 							end
 						end
 					end
-					if state.token_fn then return true end
 				end
 			end
 		end
@@ -6599,10 +6627,12 @@ local OxyParry = (function()
 		if wasRO and type(setro2) == "function" then pcall(setro2, meta, true) end
 	end
 
-	local hookScanned = false
+	local hookScannedAt = 0
 	local function ensureHook()
-		if hookScanned or next(state.captured) ~= nil then return end
-		hookScanned = true
+		if next(state.captured) ~= nil then return end
+		local nowHook = os.clock()
+		if nowHook - hookScannedAt < 2 then return end
+		hookScannedAt = nowHook
 		pcall(function()
 			for _, d in ipairs(RS:GetDescendants()) do
 				if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
@@ -6823,6 +6853,7 @@ local OxyParry = (function()
 
 	function api.ready()
 		if type(state.token_fn) ~= "function" then findToken() end
+		pcall(ensureHook)
 		return next(state.captured) ~= nil and type(state.token_fn) == "function"
 	end
 
@@ -6929,10 +6960,11 @@ local OxyParry = (function()
 	end
 
 	function api.fastBurst(count)
-		pcall(prepareParry)
+		if type(state.token_fn) ~= "function" then findToken() end
+		pcall(ensureHook)
 		local fired = 0
 		for _ = 1, count do
-			if api.fastFire(true) then fired += 1 end
+			if api.fastFire(false) then fired += 1 end
 		end
 		return fired
 	end
@@ -6950,10 +6982,10 @@ end)()
 do
 	local autoLast = 0
 	local function runParry(isAuto)
-		if v88:GetFocusedTextBox() then return false end
+		if not isAuto and v88:GetFocusedTextBox() then return false end
 		local now = os.clock()
 		if isAuto then
-			if now - autoLast < 0.1 then return false end
+			if now - autoLast < 0.02 then return false end
 			autoLast = now
 		end
 		local character = localPlayer2.Character
@@ -6973,13 +7005,9 @@ do
 		return runParry(true)
 	end
 	ExecuteSpam = function(_mode)
-		if v88:GetFocusedTextBox() then return false end
-		local okFast, fired = pcall(OxyParry.fastBurst, 16)
-		if okFast and fired and fired > 0 then return true end
-		local okRemote, fired = pcall(OxyParry.fire)
-		if okRemote and fired then return true end
-		local okDirect, fired = pcall(OxyParry.directFire)
-		return okDirect and fired or false
+		local burst = math.clamp(tonumber(getgenv().TORT_SPAM_BURST) or 4, 1, 8)
+		local okFast, fired = pcall(OxyParry.fastBurst, burst)
+		return okFast and fired and fired > 0 or false
 	end
 
 	task.delay(3, function()
@@ -7039,6 +7067,12 @@ do
 	end)
 
 	local function getBall()
+		for i = #ballCache, 1, -1 do
+			local candidate = ballCache[i]
+			if candidate and candidate.Parent and candidate:GetAttribute("target") == name then
+				return candidate
+			end
+		end
 		return ballCache[1]
 	end
 	local function ballPosition(ball)
@@ -7090,6 +7124,7 @@ do
 		return picked
 	end
 
+	local spamController = { distance = 0, last_auto = 0 }
 	local parryState = { debounce = false, until_at = 0, last_parry = 0, pendingBall = nil, lastCheck = 0 }
 	local function rearm()
 		parryState.debounce = false
@@ -7101,7 +7136,12 @@ do
 		parryState.last_parry = 0
 		parryState.lastCheck = 0
 		targetRef = nil
+		targetAt = 0
+		ballPositions = setmetatable({}, { __mode = "k" })
 		zoomiesCache = setmetatable({}, { __mode = "k" })
+		spamController.distance = 0
+		spamController.last_auto = 0
+		pcall(refreshBalls)
 	end
 	local function watchCharacter(ch)
 		if not ch then return end
@@ -7118,70 +7158,81 @@ do
 	end)
 	local function fireNow(immediate)
 		local nowValue = os.clock()
-		local gate = immediate and 0.04 or 0.07
+		local gate = immediate and 0.04 or 0.12
 		if nowValue - parryState.last_parry < gate then return end
 		parryState.last_parry = nowValue
 		parryState.debounce = true
-		parryState.until_at = nowValue + (immediate and 0.35 or 0.5)
+		parryState.until_at = nowValue + (immediate and 0.18 or 0.22)
 		pcall(ExecuteParry, SelectedParryType)
+	end
+	local function getZoomies(ball)
+		local zoomies = zoomiesCache[ball]
+		if zoomies and zoomies.Parent == ball then return zoomies end
+		zoomies = ball:FindFirstChild("zoomies")
+		if zoomies then zoomiesCache[ball] = zoomies end
+		return zoomies
 	end
 	parryState.check = function()
 		if not System or not System.__properties or not System.__properties.__autoparry_enabled then return end
 		local nowCheck = os.clock()
-		if nowCheck - parryState.lastCheck < 0.008 then return end
+		if nowCheck - parryState.lastCheck < 0.006 then return end
 		parryState.lastCheck = nowCheck
 		local _, hrp, hum = getChar()
 		if not hrp or not hum or hum.Health <= 0 then return end
-		if parryState.debounce or nowCheck < parryState.until_at then return end
+		if nowCheck < parryState.until_at then return end
+		if parryState.debounce then parryState.debounce = false end
 		local ball = parryState.pendingBall
 		if not ball or not ball.Parent or ball:GetAttribute("target") ~= name then
 			ball = getBall()
 			parryState.pendingBall = nil
-			if nowCheck - parryState.last_parry > 0.5 then rearm() end
 		end
 		if not ball or not ball.Parent then return end
-		local zoomies = zoomiesCache[ball]
-		if zoomies == nil then
-			zoomies = ball:FindFirstChild("zoomies") or false
-			zoomiesCache[ball] = zoomies
-		end
-		if not zoomies then return end
 		if ball:GetAttribute("target") ~= name then return end
+		local zoomies = getZoomies(ball)
+		if not zoomies then return end
 		local pos = ballPosition(ball)
 		if not pos then return end
-		local speed = zoomies.VectorVelocity.Magnitude
-		local distance = (hrp.Position - pos).Magnitude
-		local pingThreshold = clampValue(pingValue() / 10 / 8, 4, 22)
-		local divisor = speedDivisor(speed) * speedMultiplier() * 0.82
-		local speedFactor = 1
-		if speed > 180 then speedFactor = 1 + math.min((speed - 180) / 900, 0.32) end
-		local targetDistance = pingThreshold + math.max(speed / divisor, 11) * speedFactor
-		if distance <= targetDistance then
+		local velocity = zoomies.VectorVelocity
+		local speed = velocity.Magnitude
+		if speed < 15 then return end
+		local rel = hrp.Position - pos
+		local distance = rel.Magnitude
+		if distance > 90 then return end
+		local vdir = velocity / speed
+		local along = rel:Dot(vdir)
+		if along <= 0 then return end
+		local lateral = math.sqrt(math.max(distance * distance - along * along, 0))
+		if lateral > 7 then return end
+		local approach = velocity:Dot(rel / math.max(distance, 0.001))
+		if approach <= 0 then return end
+		local tti = (distance - 3.2) / approach
+		local accuracy = clampValue(tonumber(config.accuracy) or 100, 1, 100)
+		local window = 0.07 + (100 - accuracy) * 0.0008
+		local lead = clampValue(0.03 + pingValue() / 2000, 0.03, 0.14)
+		if tti <= lead + window and tti >= -0.15 then
 			parryState.pendingBall = nil
 			fireNow(false)
 		end
 	end
 
 	pcall(function()
-		v85.PostSimulation:Connect(function() parryState.check() end)
-	end)
-	pcall(function()
-		v85.PreSimulation:Connect(function() parryState.check() end)
-	end)
-	pcall(function()
-		game:GetService("RunService").Heartbeat:Connect(function() parryState.check() end)
+		v85.PreSimulation:Connect(function()
+			parryState.check()
+			spamController.auto_check()
+		end)
 	end)
 	pcall(function()
 		if not balls then return end
 		local function bindBall(ball)
 			if not ball then return end
+			ball:GetAttributeChangedSignal("realBall"):Connect(refreshBalls)
 			ball:GetAttributeChangedSignal("target"):Connect(function()
 				if ball:GetAttribute("target") == name then
 					parryState.pendingBall = ball
+					rearm()
 				elseif parryState.pendingBall == ball then
 					parryState.pendingBall = nil
 				end
-				rearm()
 			end)
 		end
 		for _, ball in ipairs(balls:GetChildren()) do bindBall(ball) end
@@ -7198,7 +7249,6 @@ do
 		if successAll then successAll.OnClientEvent:Connect(rearm) end
 	end)
 
-	local spamController = { distance = 0, last_auto = 0 }
 	spamController.perform = function(inputValue)
 		local ball = getBall()
 		local current = closestTarget()
@@ -7214,18 +7264,14 @@ do
 		if inputValue.Entity_Distance > calculationA then return spamController.distance end
 		if calculationA < inputValue.Ball_Distance then return spamController.distance end
 		if calculationA < tertiaryValue then return spamController.distance end
-		spamController.distance = calculationA - clampValue(secondaryValue, -1, 0) * (5 - minValue(speed / 5, 5))
+		spamController.distance = calculationA + clampValue(secondaryValue, 0, 1) * (5 - minValue(speed / 5, 5))
 		return spamController.distance
 	end
 	spamController.auto_check = function()
 		if not System or not System.__properties or not System.__properties.__auto_spam_enabled then return end
 		local ball = getBall()
 		if not ball or not ball.Parent then return end
-		local zoomies = zoomiesCache[ball]
-		if zoomies == nil then
-			zoomies = ball:FindFirstChild("zoomies") or false
-			zoomiesCache[ball] = zoomies
-		end
+		local zoomies = getZoomies(ball)
 		if not zoomies then return end
 		local current = closestTarget()
 		local ch, hrp = getChar()
@@ -7246,14 +7292,12 @@ do
 		if candidateValue > threshold or magnitude > threshold then return end
 		if ch and ch:GetAttribute("Pulsed") then return end
 		if attribute == name and candidateValue > 30 and magnitude > 30 then return end
-		if nowValue - spamController.last_auto >= 0.008 then
+		local interval = clampValue(tonumber(getgenv().TORT_SPAM_INTERVAL) or 0.012, 0.008, 0.05)
+		if nowValue - spamController.last_auto >= interval then
 			spamController.last_auto = nowValue
 			pcall(ExecuteSpam, SelectedParryType)
 		end
 	end
-	pcall(function()
-		v85.PreSimulation:Connect(function() spamController.auto_check() end)
-	end)
 end
 
 								v87.Remotes.InfinityBall.OnClientEvent:Connect(function(arg, infinityActive)
