@@ -10,8 +10,8 @@ getgenv().AutoSpamMode = getgenv().AutoSpamMode or "Remote"
 getgenv().ManualSpamMode = getgenv().ManualSpamMode or "Remote"
 getgenv().TriggerbotKeypress = false
 getgenv().TORT_UI_READY = false
-getgenv().TORT_VIDEO_ASSET = getgenv().TORT_VIDEO_ASSET or ""
-getgenv().TORT_MUSIC_ASSET = getgenv().TORT_MUSIC_ASSET or ""
+getgenv().TORT_VIDEO_ASSET = getgenv().TORT_VIDEO_ASSET or "5608384572"
+getgenv().TORT_MUSIC_ASSET = getgenv().TORT_MUSIC_ASSET or "126132092368935"
 
 -- ============================================================
 -- TORT loading animation
@@ -64,8 +64,12 @@ pcall(function()
         loadVideo.Video = mediaSource("https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/t.mp4", getgenv().TORT_VIDEO_ASSET)
         loadVideo.Looped = true
         loadVideo.Volume = 0
-        loadVideo.Playing = true
         loadVideo.Parent = bg
+        loadVideo.Playing = true
+        loadVideo.Loaded:Connect(function()
+            pcall(function() loadVideo:Play() end)
+        end)
+        pcall(function() loadVideo:Play() end)
     end)
 
     local loadSound = nil
@@ -6680,6 +6684,30 @@ local OxyParry = (function()
 	local trackCache = {}
 	local swordTypeCache = {}
 	local lastGrab = 0
+	local lastSfx = 0
+	local sfxCache = {}
+	local sfxIds = { 73399649338746, 109836169420757 }
+	local function playParrySfx()
+		local nowSfx = os.clock()
+		if nowSfx - lastSfx < 0.05 then return end
+		lastSfx = nowSfx
+		for i, id in ipairs(sfxIds) do
+			local sound = sfxCache[i]
+			if not sound then
+				pcall(function()
+					sound = Instance.new("Sound")
+					sound.SoundId = "rbxassetid://" .. tostring(id)
+					sound.Volume = 0.4
+					sound.Parent = game:GetService("SoundService")
+					sfxCache[i] = sound
+				end)
+			end
+			if sound then
+				pcall(function() sound:Play() end)
+				return
+			end
+		end
+	end
 	local function findGrabAnim(animType)
 		if animCache[animType] then return animCache[animType] end
 		local shared = RS:FindFirstChild("Shared")
@@ -6701,6 +6729,7 @@ local OxyParry = (function()
 	end
 
 	local function prepareParry()
+		playParrySfx()
 		pcall(function()
 			local ch = lp2.Character
 			local hum = ch and ch:FindFirstChildOfClass("Humanoid")
@@ -6723,8 +6752,13 @@ local OxyParry = (function()
 			end
 
 			local anim = findGrabAnim(animType)
-			if not anim then return end
-			local trackKey = anim:GetFullName()
+			local fallbackAnim = false
+			if not anim then
+				anim = Instance.new("Animation")
+				anim.AnimationId = "rbxassetid://13761775939"
+				fallbackAnim = true
+			end
+			local trackKey = fallbackAnim and "TORT_FallbackParry" or anim:GetFullName()
 			local entry = trackCache[trackKey]
 			if not entry or entry.Animator ~= animator then
 				entry = { Animator = animator, Track = animator:LoadAnimation(anim) }
