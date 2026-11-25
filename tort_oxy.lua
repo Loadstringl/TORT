@@ -62,21 +62,36 @@ pcall(function()
         return raw
     end
 
-    local loadVideo = nil
     pcall(function()
-        loadVideo = Instance.new("VideoFrame")
-        loadVideo.Size = UDim2.fromScale(1, 1)
-        loadVideo.BackgroundTransparency = 1
-        loadVideo.Video = mediaSource("https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/t.mp4", getgenv().TORT_VIDEO_ASSET)
-        loadVideo.Looped = true
-        loadVideo.Volume = 0
-        loadVideo.Parent = bg
-        loadVideo.Playing = true
-        loadVideo.Loaded:Connect(function()
+        local loadArt = Instance.new("ImageLabel")
+        loadArt.Name = "TORT_LoadingArt"
+        loadArt.Image = mediaSource("https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/anime.png", getgenv().TORT_ART_ASSET)
+        loadArt.Size = UDim2.fromScale(1, 1)
+        loadArt.BackgroundTransparency = 1
+        loadArt.BorderSizePixel = 0
+        loadArt.ImageTransparency = 0.35
+        loadArt.ScaleType = Enum.ScaleType.Crop
+        loadArt.ZIndex = 0
+        loadArt.Parent = bg
+    end)
+
+    local loadVideo = nil
+    if not getgenv().TORT_LITE_MODE then
+        pcall(function()
+            loadVideo = Instance.new("VideoFrame")
+            loadVideo.Size = UDim2.fromScale(1, 1)
+            loadVideo.BackgroundTransparency = 1
+            loadVideo.Video = mediaSource("https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/t.mp4", getgenv().TORT_VIDEO_ASSET)
+            loadVideo.Looped = true
+            loadVideo.Volume = 0
+            loadVideo.Parent = bg
+            loadVideo.Playing = true
+            loadVideo.Loaded:Connect(function()
+                pcall(function() loadVideo:Play() end)
+            end)
             pcall(function() loadVideo:Play() end)
         end)
-        pcall(function() loadVideo:Play() end)
-    end)
+    end
 
     local loadSound = nil
     pcall(function()
@@ -88,10 +103,6 @@ pcall(function()
         loadSound.Parent = game:GetService("SoundService")
         loadSound:Play()
     end)
-    pcall(function()
-        game:GetService("ContentProvider"):PreloadAsync({ loadVideo, loadSound })
-    end)
-
     local card = Instance.new("Frame")
     card.AnchorPoint = Vector2.new(0.5, 0.5)
     card.Position = UDim2.fromScale(0.5, 0.5)
@@ -1050,6 +1061,18 @@ index._connections = obj2
 												bgFx.BorderSizePixel = 0
 												bgFx.ZIndex = 0
 												bgFx.Parent = frame
+												local animeFallback = Instance.new("ImageLabel")
+												animeFallback.Name = "AnimeArtFallback"
+												animeFallback.Image = "rbxassetid://3241672653"
+												animeFallback.Size = UDim2.fromScale(1, 1)
+												animeFallback.BackgroundTransparency = 1
+												animeFallback.BorderSizePixel = 0
+												animeFallback.ImageTransparency = 0.55
+												animeFallback.ScaleType = Enum.ScaleType.Crop
+												animeFallback.ZIndex = 0
+												animeFallback.Active = false
+												animeFallback.Selectable = false
+												animeFallback.Parent = bgFx
 												local artAsset = getgenv().TORT_ART_ASSET or "5252447904"
 												local animeArt = Instance.new("ImageLabel")
 												animeArt.Name = "AnimeArt"
@@ -1058,9 +1081,9 @@ index._connections = obj2
 												animeArt.Position = UDim2.fromScale(0, 0)
 												animeArt.BackgroundTransparency = 1
 												animeArt.BorderSizePixel = 0
-												animeArt.ImageTransparency = 0.72
+												animeArt.ImageTransparency = 0.18
 												animeArt.ScaleType = Enum.ScaleType.Crop
-												animeArt.ZIndex = 0
+												animeArt.ZIndex = 1
 												animeArt.Active = false
 												animeArt.Selectable = false
 												animeArt.Parent = bgFx
@@ -1070,7 +1093,7 @@ index._connections = obj2
 													ColorSequenceKeypoint.new(0.5, Color3.fromRGB(20, 25, 70)),
 													ColorSequenceKeypoint.new(1, Color3.fromRGB(85, 20, 55)),
 												})
-												bgGrad.Transparency = NumberSequence.new(0.62)
+												bgGrad.Transparency = NumberSequence.new(0.45)
 												bgGrad.Rotation = 0
 												bgGrad.Parent = bgFx
 												task.spawn(function()
@@ -1592,10 +1615,11 @@ end)
 													getgenv().TORT_UI_READY = true
 
 													task.spawn(function()
+														if getgenv().TORT_LITE_MODE then return end
 														local tbl26 = {}
 
 														for _, v113 in screenGui:GetDescendants() do
-															if v113:IsA("ImageLabel") then
+															if v113:IsA("ImageLabel") and v113.Name ~= "AnimeArt" and v113.Name ~= "AnimeArtFallback" then
 																table.insert(tbl26, v113)
 															end
 														end
@@ -6507,6 +6531,7 @@ local OxyParry = (function()
 		firstAttemptAt = 0,
 		broken = false,
 	}
+	local bootAt = os.clock()
 
 	-- Track server-confirmed parries. If replayed remotes stop producing
 	-- ParrySuccess, the replay is being rejected and we fall back to the
@@ -6523,15 +6548,31 @@ local OxyParry = (function()
 	end)
 
 	local tokenSearchedAt = 0
+	local tokenScanList = nil
+	local tokenScanIndex = 1
+	local tokenScanDone = false
 	local function findToken()
 		if type(state.token_fn) == "function" then return true end
 		local nowToken = os.clock()
-		if nowToken - tokenSearchedAt < 5 then return false end
-		tokenSearchedAt = nowToken
-		if type(getgc2) ~= "function" then return false end
-		local gc = getgc2(true)
-		if type(gc) ~= "table" then return false end
-		for _, f in ipairs(gc) do
+		if nowToken - bootAt < 2.5 then return false end
+		if tokenScanDone and nowToken - tokenSearchedAt < 5 then return false end
+		if tokenScanDone then
+			tokenScanDone = false
+			tokenScanList = nil
+		end
+		if not tokenScanList then
+			if type(getgc2) ~= "function" then return false end
+			tokenScanList = getgc2(true)
+			if type(tokenScanList) ~= "table" then
+				tokenScanList = nil
+				return false
+			end
+			tokenScanIndex = 1
+		end
+		local deadline = os.clock() + 0.003
+		while tokenScanIndex <= #tokenScanList and os.clock() < deadline do
+			local f = tokenScanList[tokenScanIndex]
+			tokenScanIndex += 1
 			if type(f) == "function" then
 				local okSrc, src = pcall(debug.info, f, "s")
 				if okSrc and type(src) == "string" and src:find("PRY", 1, true) then
@@ -6550,8 +6591,19 @@ local OxyParry = (function()
 				end
 			end
 		end
+		if tokenScanIndex > #tokenScanList then
+			tokenScanDone = true
+			tokenSearchedAt = nowToken
+			tokenScanList = nil
+		end
 		return false
 	end
+	task.spawn(function()
+		while type(state.token_fn) ~= "function" do
+			findToken()
+			task.wait(0.15)
+		end
+	end)
 
 	local function polygon(seed)
 		if type(state.token_fn) ~= "function" then findToken() end
@@ -6628,20 +6680,52 @@ local OxyParry = (function()
 	end
 
 	local hookScannedAt = 0
+	local hookList = nil
+	local hookIndex = 1
+	local hookDone = false
 	local function ensureHook()
 		if next(state.captured) ~= nil then return end
 		local nowHook = os.clock()
-		if nowHook - hookScannedAt < 2 then return end
-		hookScannedAt = nowHook
-		pcall(function()
-			for _, d in ipairs(RS:GetDescendants()) do
-				if d:IsA("RemoteEvent") or d:IsA("RemoteFunction") then
-					hook(d)
-					if next(state.captured) ~= nil then break end
+		if nowHook - bootAt < 2.5 then return end
+		if hookDone and nowHook - hookScannedAt < 2 then return end
+		if hookDone then
+			hookDone = false
+			hookList = nil
+		end
+		if not hookList then
+			local okList, list = pcall(function() return RS:GetDescendants() end)
+			if not okList or type(list) ~= "table" then return end
+			hookList = list
+			hookIndex = 1
+		end
+		local deadline = os.clock() + 0.003
+		while hookIndex <= #hookList and os.clock() < deadline do
+			local d = hookList[hookIndex]
+			hookIndex += 1
+			local okRemote, isRemote = pcall(function()
+				return d:IsA("RemoteEvent") or d:IsA("RemoteFunction")
+			end)
+			if okRemote and isRemote then
+				pcall(hook, d)
+				if next(state.captured) ~= nil then
+					hookDone = true
+					hookList = nil
+					return
 				end
 			end
-		end)
+		end
+		if hookIndex > #hookList then
+			hookDone = true
+			hookScannedAt = nowHook
+			hookList = nil
+		end
 	end
+	task.spawn(function()
+		while next(state.captured) == nil do
+			ensureHook()
+			task.wait(0.15)
+		end
+	end)
 
 	local function buildArgs()
 		local cam = Workspace2.CurrentCamera
