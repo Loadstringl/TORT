@@ -10,6 +10,8 @@ getgenv().AutoSpamMode = getgenv().AutoSpamMode or "Remote"
 getgenv().ManualSpamMode = getgenv().ManualSpamMode or "Remote"
 getgenv().TriggerbotKeypress = false
 getgenv().TORT_UI_READY = false
+getgenv().TORT_VIDEO_ASSET = getgenv().TORT_VIDEO_ASSET or ""
+getgenv().TORT_MUSIC_ASSET = getgenv().TORT_MUSIC_ASSET or ""
 
 -- ============================================================
 -- TORT loading animation
@@ -44,12 +46,22 @@ pcall(function()
     bg.BorderSizePixel = 0
     bg.Parent = gui
 
+    local function mediaSource(raw, asset)
+        if asset and asset ~= "" then
+            if tostring(asset):sub(1, 12) == "rbxassetid://" or tostring(asset):sub(1, 8) == "http://" or tostring(asset):sub(1, 9) == "https://" then
+                return tostring(asset)
+            end
+            return "rbxassetid://" .. tostring(asset)
+        end
+        return raw
+    end
+
     local loadVideo = nil
     pcall(function()
         loadVideo = Instance.new("VideoFrame")
         loadVideo.Size = UDim2.fromScale(1, 1)
         loadVideo.BackgroundTransparency = 1
-        loadVideo.Video = "https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/t.mp4"
+        loadVideo.Video = mediaSource("https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/t.mp4", getgenv().TORT_VIDEO_ASSET)
         loadVideo.Looped = true
         loadVideo.Volume = 0
         loadVideo.Playing = true
@@ -60,11 +72,14 @@ pcall(function()
     pcall(function()
         loadSound = Instance.new("Sound")
         loadSound.Name = "TORT_LoadingSound"
-        loadSound.SoundId = "https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/montagem.mp3"
+        loadSound.SoundId = mediaSource("https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/montagem.mp3", getgenv().TORT_MUSIC_ASSET)
         loadSound.Volume = 0.45
         loadSound.Looped = false
         loadSound.Parent = game:GetService("SoundService")
         loadSound:Play()
+    end)
+    pcall(function()
+        game:GetService("ContentProvider"):PreloadAsync({ loadVideo, loadSound })
     end)
 
     local card = Instance.new("Frame")
