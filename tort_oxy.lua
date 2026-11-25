@@ -6982,6 +6982,11 @@ local OxyParry = (function()
 
 	local api = {}
 
+	function api.hookRemote()
+		pcall(ensureHook)
+		return next(state.captured) ~= nil
+	end
+
 	function api.ready()
 		if type(state.token_fn) ~= "function" then findToken() end
 		pcall(ensureHook)
@@ -7146,6 +7151,10 @@ do
 		local okFast, fired = pcall(OxyParry.fastBurst, burst)
 		return okFast and fired and fired > 0 or false
 	end
+
+	task.delay(2.6, function()
+		pcall(OxyParry.hookRemote)
+	end)
 end
 
 do
