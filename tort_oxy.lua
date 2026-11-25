@@ -44,6 +44,29 @@ pcall(function()
     bg.BorderSizePixel = 0
     bg.Parent = gui
 
+    local loadVideo = nil
+    pcall(function()
+        loadVideo = Instance.new("VideoFrame")
+        loadVideo.Size = UDim2.fromScale(1, 1)
+        loadVideo.BackgroundTransparency = 1
+        loadVideo.Video = "https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/t.mp4"
+        loadVideo.Looped = true
+        loadVideo.Volume = 0
+        loadVideo.Playing = true
+        loadVideo.Parent = bg
+    end)
+
+    local loadSound = nil
+    pcall(function()
+        loadSound = Instance.new("Sound")
+        loadSound.Name = "TORT_LoadingSound"
+        loadSound.SoundId = "https://raw.githubusercontent.com/Loadstringl/TORT/main/assets/montagem.mp3"
+        loadSound.Volume = 0.45
+        loadSound.Looped = false
+        loadSound.Parent = game:GetService("SoundService")
+        loadSound:Play()
+    end)
+
     local card = Instance.new("Frame")
     card.AnchorPoint = Vector2.new(0.5, 0.5)
     card.Position = UDim2.fromScale(0.5, 0.5)
@@ -173,6 +196,8 @@ pcall(function()
         loadTween:Create(barBg, info, { BackgroundTransparency = 1 }):Play()
         loadTween:Create(bar, info, { BackgroundTransparency = 1 }):Play()
         task.wait(0.5)
+        pcall(function() if loadVideo then loadVideo.Visible = false end end)
+        pcall(function() if loadSound then loadSound:Stop(); loadSound:Destroy() end end)
         if loadBlur then
             pcall(function() loadTween:Create(loadBlur, TweenInfo.new(0.4), { Size = 0 }):Play() end)
             task.wait(0.4)
