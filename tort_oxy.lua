@@ -6737,6 +6737,7 @@ local OxyParry = (function()
 	local hookList = nil
 	local hookIndex = 1
 	local hookDone = false
+	local hookWatchStarted = false
 	local function ensureHook()
 		if next(state.captured) ~= nil then return end
 		local nowHook = os.clock()
@@ -6987,6 +6988,17 @@ local OxyParry = (function()
 		return next(state.captured) ~= nil
 	end
 
+	function api.watchHook()
+		if hookWatchStarted then return end
+		hookWatchStarted = true
+		task.spawn(function()
+			while not hookDone and next(state.captured) == nil do
+				pcall(ensureHook)
+				task.wait(0.15)
+			end
+		end)
+	end
+
 	function api.ready()
 		if type(state.token_fn) ~= "function" then findToken() end
 		pcall(ensureHook)
@@ -7153,7 +7165,7 @@ do
 	end
 
 	task.delay(2.6, function()
-		pcall(OxyParry.hookRemote)
+		pcall(OxyParry.watchHook)
 	end)
 end
 
