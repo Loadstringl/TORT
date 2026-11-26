@@ -9,8 +9,12 @@ getgenv().NEHUB_TOKEN_READY = false
 getgenv().NEHUB_LOCK_UNTIL = 0
 getgenv().NEHUB_LAST_SUCCESS = 0
 getgenv().NEHUB_LAST_FIRE = 0
-getgenv().NEHUB_TTI = 0.72
-getgenv().NEHUB_APPROACH_GATE = 0.08
+getgenv().NEHUB_TTI = 0.82
+getgenv().NEHUB_APPROACH_GATE = 0.04
+getgenv().NEHUB_FIRE_GAP = 0.01
+getgenv().NEHUB_POST_FIRE_LOCK = 0.08
+getgenv().NEHUB_MANUAL_GAP = 0.04
+getgenv().NEHUB_AUTO_GAP = 0.03
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -503,18 +507,34 @@ local lastAutoSpam = 0
 local function tryFire()
 	local now = os.clock()
 	if now < (getgenv().NEHUB_LOCK_UNTIL or 0) then return false end
-	if now - lastAttempt < 0.02 then return false end
+	if now - lastAttempt < (getgenv().NEHUB_FIRE_GAP or 0.01) then return false end
 	lastAttempt = now
 	local ok = NEParry.fire()
 	if not ok then ok = NEParry.directFire() end
-	if ok then getgenv().NEHUB_LOCK_UNTIL = now + 0.18 end
+	if ok then getgenv().NEHUB_LOCK_UNTIL = now + (getgenv().NEHUB_POST_FIRE_LOCK or 0.08) end
 	return ok
+end
+
+local function nearbyCrowd(hrp)
+	local count = 0
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer and player.Character then
+			local otherHRP = player.Character:FindFirstChild("HumanoidRootPart")
+			local otherHumanoid = player.Character:FindFirstChildOfClass("Humanoid")
+			if otherHRP and otherHumanoid and otherHumanoid.Health > 0
+				and (otherHRP.Position - hrp.Position).Magnitude <= 45 then
+				count += 1
+			end
+		end
+	end
+	return count
 end
 
 local function threatBall(hrp)
 	local best = nil
 	local bestScore = math.huge
-	local gate = getgenv().NEHUB_APPROACH_GATE or 0.08
+	local gate = getgenv().NEHUB_APPROACH_GATE or 0.04
+	local crowd = nearbyCrowd(hrp)
 	for _, ball in ipairs(ballCache) do
 		if ball and ball.Parent then
 			local zoomies = ball:FindFirstChild("zoomies")
@@ -525,33 +545,43 @@ local function threatBall(hrp)
 					local rel = hrp.Position - ball.Position
 					local distance = rel.Magnitude
 					local approach = velocity:Dot(rel / math.max(distance, 0.001))
-					if approach > speed * gate then
-						local radius = clamp(speed * 0.06, 7, 14)
-						local timeToParry = math.max((distance - radius) / speed, 0)
-						local timeToImpact = distance / speed
-						local predicted = ball.Position + velocity * timeToImpact
-						local willHit = (predicted - hrp.Position).Magnitude <= radius * 1.6
-						local target = ball:GetAttribute("target")
-						local selfTarget = target == LocalPlayer.Name or target == nil
-						if selfTarget or willHit then
-							local score = timeToParry + (selfTarget and 0 or 0.2)
-							if score < bestScore then
-								bestScore = score
-								best = {
-									velocity = velocity,
-									speed = speed,
-									distance = distance,
-									approach = approach,
-									timeToParry = timeToParry,
-								}
+					local radius = clamp(speed * 0.06, 7, 14)
+					local timeToParry = math.max((distance - radius) / speed, 0)
+					local timeToImpact = distance / speed
+					local predicted = ball.Position + velocity * timeToImpact
+					local willHit = (predicted - hrp.Position).Magnitude <= radius * 1.6
+					local target = ball:GetAttribute("target")
+					local selfTarget = target == LocalPlayer.Name or target == nil
+					local nearOther = false
+					for _, player in ipairs(Players:GetPlayers()) do
+						if player ~= LocalPlayer and player.Character then
+							local otherHRP = player.Character:FindFirstChild("HumanoidRootPart")
+							if otherHRP and (hrp.Position - otherHRP.Position).Magnitude <= 45
+								and (ball.Position - otherHRP.Position).Magnitude <= 18 then
+								nearOther = true
+								break
 							end
+						end
+					end
+					if (selfTarget or willHit or nearOther) and (approach > speed * gate or nearOther) then
+						local score = timeToParry - math.min(crowd * 0.04, 0.16)
+						if nearOther then score -= 0.1 end
+						if score < bestScore then
+							bestScore = score
+							best = {
+								velocity = velocity,
+								speed = speed,
+								distance = distance,
+								approach = approach,
+								timeToParry = timeToParry,
+							}
 						end
 					end
 				end
 			end
 		end
 	end
-	return best
+	return best, crowd
 end
 
 RunService.PreSimulation:Connect(function()
@@ -562,20 +592,20 @@ RunService.PreSimulation:Connect(function()
 
 	if getgenv().NEHUB_MANUAL_SPAM then
 		local now = os.clock()
-		if now - lastManual >= 0.15 then
+		if now - lastManual >= (getgenv().NEHUB_MANUAL_GAP or 0.04) then
 			lastManual = now
 			tryFire()
 		end
 	end
 
 	refreshBalls()
-	local threat = threatBall(hrp)
+	local threat, crowd = threatBall(hrp)
 	if not threat then return end
 	local speed = threat.speed
 	local distance = threat.distance
 	local threshold = clamp(pingValue() / 80, 4, 22) + math.max(speed / speedDivisor(speed), 9.5)
 	local pingAllowance = clamp(pingValue() / 1000, 0, 0.15)
-	local window = (getgenv().NEHUB_TTI or 0.72) + pingAllowance
+	local window = (getgenv().NEHUB_TTI or 0.82) + pingAllowance + math.min(crowd * 0.05, 0.2)
 
 	if getgenv().NEHUB_AP and threat.timeToParry <= window then
 		tryFire()
@@ -585,7 +615,7 @@ RunService.PreSimulation:Connect(function()
 	end
 	if getgenv().NEHUB_AUTO_SPAM and distance <= threshold * 1.2 then
 		local now = os.clock()
-		if now - lastAutoSpam >= 0.08 then
+		if now - lastAutoSpam >= (getgenv().NEHUB_AUTO_GAP or 0.03) then
 			lastAutoSpam = now
 			tryFire()
 		end
@@ -653,8 +683,12 @@ pcall(function()
 	end)
 end)
 
-task.delay(3, function()
-	pcall(function() NEParry.ready() end)
+task.spawn(function()
+	for _ = 1, 8 do
+		pcall(function() NEParry.ready() end)
+		if getgenv().NEHUB_HOOK_READY then break end
+		task.wait(0.25)
+	end
 	local status = getgenv().NEHUB_HOOK_READY and "HOOK OK" or "HOOK NOT FOUND"
 	local detail = " | token=" .. tostring(getgenv().NEHUB_TOKEN_READY == true)
 		.. " | captured=" .. tostring(getgenv().NEHUB_HOOK_CAPTURED == true)
