@@ -427,12 +427,27 @@ end)()
 
 local ballsFolder = Workspace:WaitForChild("Balls", 5)
 local ballCache = {}
+local lastBallRefresh = 0
 
-local function refreshBalls()
+local function refreshBalls(force)
+	local now = os.clock()
+	if not force and now - lastBallRefresh < 0.05 then return end
+	lastBallRefresh = now
 	for i = #ballCache, 1, -1 do ballCache[i] = nil end
-	if not ballsFolder then return end
-	for _, ball in ipairs(ballsFolder:GetChildren()) do
-		if ball:GetAttribute("realBall") then ballCache[#ballCache + 1] = ball end
+	local folder = ballsFolder or Workspace:FindFirstChild("Balls")
+	if not folder then return end
+	for _, ball in ipairs(folder:GetChildren()) do
+		if ball:IsA("BasePart") and ball:GetAttribute("realBall") then
+			ballCache[#ballCache + 1] = ball
+		end
+	end
+	if #ballCache == 0 then
+		for _, obj in ipairs(Workspace:GetDescendants()) do
+			local zoomies = obj:FindFirstChild("zoomies")
+			if obj:IsA("BasePart") and zoomies and zoomies:FindFirstChild("VectorVelocity") then
+				ballCache[#ballCache + 1] = obj
+			end
+		end
 	end
 end
 
@@ -440,12 +455,12 @@ refreshBalls()
 
 if ballsFolder then
 	ballsFolder.ChildAdded:Connect(function(ball)
-		refreshBalls()
+		refreshBalls(true)
 		if ball then
-			ball:GetAttributeChangedSignal("realBall"):Connect(refreshBalls)
+			ball:GetAttributeChangedSignal("realBall"):Connect(function() refreshBalls(true) end)
 		end
 	end)
-	ballsFolder.ChildRemoved:Connect(refreshBalls)
+	ballsFolder.ChildRemoved:Connect(function() refreshBalls(true) end)
 end
 
 local cachedPing = 0
@@ -496,13 +511,47 @@ local function tryFire()
 	return ok
 end
 
-local function targetedBall()
-	for _, candidate in ipairs(ballCache) do
-		if candidate and candidate.Parent and candidate:GetAttribute("target") == LocalPlayer.Name then
-			return candidate
+local function threatBall(hrp)
+	local best = nil
+	local bestScore = math.huge
+	local gate = getgenv().NEHUB_APPROACH_GATE or 0.08
+	for _, ball in ipairs(ballCache) do
+		if ball and ball.Parent then
+			local zoomies = ball:FindFirstChild("zoomies")
+			if zoomies then
+				local velocity = zoomies.VectorVelocity
+				local speed = velocity.Magnitude
+				if speed > 1 then
+					local rel = hrp.Position - ball.Position
+					local distance = rel.Magnitude
+					local approach = velocity:Dot(rel / math.max(distance, 0.001))
+					if approach > speed * gate then
+						local radius = clamp(speed * 0.06, 7, 14)
+						local timeToParry = math.max((distance - radius) / speed, 0)
+						local timeToImpact = distance / speed
+						local predicted = ball.Position + velocity * timeToImpact
+						local willHit = (predicted - hrp.Position).Magnitude <= radius * 1.6
+						local target = ball:GetAttribute("target")
+						local selfTarget = target == LocalPlayer.Name or target == nil
+						if selfTarget or willHit then
+							local score = timeToParry + (selfTarget and 0 or 0.2)
+							if score < bestScore then
+								bestScore = score
+								best = {
+									velocity = velocity,
+									speed = speed,
+									distance = distance,
+									approach = approach,
+									timeToParry = timeToParry,
+								}
+							end
+						end
+					end
+				end
+			end
 		end
 	end
-	return nil
+	return best
 end
 
 RunService.PreSimulation:Connect(function()
@@ -519,28 +568,22 @@ RunService.PreSimulation:Connect(function()
 		end
 	end
 
-	local ball = targetedBall()
-	if not ball then return end
-	local zoomies = ball:FindFirstChild("zoomies")
-	if not zoomies then return end
-	local velocity = zoomies.VectorVelocity
-	local speed = velocity.Magnitude
-	if speed < 1 then return end
-	local rel = hrp.Position - ball.Position
-	local distance = rel.Magnitude
-	local approach = velocity:Dot(rel / math.max(distance, 0.001))
+	refreshBalls()
+	local threat = threatBall(hrp)
+	if not threat then return end
+	local speed = threat.speed
+	local distance = threat.distance
 	local threshold = clamp(pingValue() / 80, 4, 22) + math.max(speed / speedDivisor(speed), 9.5)
-	local tti = distance / speed
 	local pingAllowance = clamp(pingValue() / 1000, 0, 0.15)
-	local approachGate = getgenv().NEHUB_APPROACH_GATE or 0.08
+	local window = (getgenv().NEHUB_TTI or 0.72) + pingAllowance
 
-	if getgenv().NEHUB_AP and approach > speed * approachGate and (tti <= (getgenv().NEHUB_TTI or 0.72) + pingAllowance or distance <= threshold) then
+	if getgenv().NEHUB_AP and threat.timeToParry <= window then
 		tryFire()
 	end
-	if getgenv().NEHUB_TRIGGER and approach > speed * approachGate and distance <= threshold * 1.35 then
+	if getgenv().NEHUB_TRIGGER and distance <= threshold * 1.35 then
 		tryFire()
 	end
-	if getgenv().NEHUB_AUTO_SPAM and approach > speed * approachGate and distance <= threshold * 1.2 then
+	if getgenv().NEHUB_AUTO_SPAM and distance <= threshold * 1.2 then
 		local now = os.clock()
 		if now - lastAutoSpam >= 0.08 then
 			lastAutoSpam = now
