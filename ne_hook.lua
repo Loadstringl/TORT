@@ -9,6 +9,8 @@ getgenv().NEHUB_TOKEN_READY = false
 getgenv().NEHUB_LOCK_UNTIL = 0
 getgenv().NEHUB_LAST_SUCCESS = 0
 getgenv().NEHUB_LAST_FIRE = 0
+getgenv().NEHUB_TTI = 0.72
+getgenv().NEHUB_APPROACH_GATE = 0.08
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -486,11 +488,11 @@ local lastAutoSpam = 0
 local function tryFire()
 	local now = os.clock()
 	if now < (getgenv().NEHUB_LOCK_UNTIL or 0) then return false end
-	if now - lastAttempt < 0.05 then return false end
+	if now - lastAttempt < 0.02 then return false end
 	lastAttempt = now
 	local ok = NEParry.fire()
 	if not ok then ok = NEParry.directFire() end
-	if ok then getgenv().NEHUB_LOCK_UNTIL = now + 0.3 end
+	if ok then getgenv().NEHUB_LOCK_UNTIL = now + 0.18 end
 	return ok
 end
 
@@ -529,15 +531,16 @@ RunService.PreSimulation:Connect(function()
 	local approach = velocity:Dot(rel / math.max(distance, 0.001))
 	local threshold = clamp(pingValue() / 80, 4, 22) + math.max(speed / speedDivisor(speed), 9.5)
 	local tti = distance / speed
-	local pingAllowance = clamp(pingValue() / 1000, 0, 0.12)
+	local pingAllowance = clamp(pingValue() / 1000, 0, 0.15)
+	local approachGate = getgenv().NEHUB_APPROACH_GATE or 0.08
 
-	if getgenv().NEHUB_AP and approach > speed * 0.18 and (tti <= 0.55 + pingAllowance or distance <= threshold) then
+	if getgenv().NEHUB_AP and approach > speed * approachGate and (tti <= (getgenv().NEHUB_TTI or 0.72) + pingAllowance or distance <= threshold) then
 		tryFire()
 	end
-	if getgenv().NEHUB_TRIGGER and approach > speed * 0.1 and distance <= threshold * 1.35 then
+	if getgenv().NEHUB_TRIGGER and approach > speed * approachGate and distance <= threshold * 1.35 then
 		tryFire()
 	end
-	if getgenv().NEHUB_AUTO_SPAM and approach > speed * 0.15 and distance <= threshold * 1.2 then
+	if getgenv().NEHUB_AUTO_SPAM and approach > speed * approachGate and distance <= threshold * 1.2 then
 		local now = os.clock()
 		if now - lastAutoSpam >= 0.08 then
 			lastAutoSpam = now
