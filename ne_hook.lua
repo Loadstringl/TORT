@@ -50,6 +50,84 @@ local function notify(title, text, duration)
 	end)
 end
 
+local uiState = {
+	AP = true,
+	ManualSpam = false,
+	Trigger = false,
+	AutoSpam = false,
+}
+getgenv().NEHUB_AP = uiState.AP
+getgenv().NEHUB_MANUAL_SPAM = uiState.ManualSpam
+getgenv().NEHUB_TRIGGER = uiState.Trigger
+getgenv().NEHUB_AUTO_SPAM = uiState.AutoSpam
+
+pcall(function()
+	local gui = Instance.new("ScreenGui")
+	gui.Name = "NEHUB_UI"
+	gui.ResetOnSpawn = false
+	gui.IgnoreGuiInset = true
+	gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.fromOffset(230, 176)
+	frame.Position = UDim2.fromOffset(18, 18)
+	frame.BackgroundColor3 = Color3.fromRGB(6, 6, 12)
+	frame.BorderSizePixel = 0
+	frame.Draggable = true
+	frame.Active = true
+	frame.Parent = gui
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 8)
+	corner.Parent = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(255, 255, 255)
+	stroke.Transparency = 0.82
+	stroke.Parent = frame
+
+	local title = Instance.new("TextLabel")
+	title.Size = UDim2.new(1, 0, 0, 30)
+	title.BackgroundTransparency = 1
+	title.Text = "NoEnemiesHub"
+	title.Font = Enum.Font.GothamBold
+	title.TextSize = 15
+	title.TextColor3 = Color3.fromRGB(235, 235, 245)
+	title.Parent = frame
+
+	local flagNames = {
+		AP = "NEHUB_AP",
+		ManualSpam = "NEHUB_MANUAL_SPAM",
+		Trigger = "NEHUB_TRIGGER",
+		AutoSpam = "NEHUB_AUTO_SPAM",
+	}
+	local function addToggle(name, y, key)
+		local button = Instance.new("TextButton")
+		button.Size = UDim2.new(1, -24, 0, 30)
+		button.Position = UDim2.fromOffset(12, y)
+		button.Font = Enum.Font.GothamBold
+		button.TextSize = 12
+		button.Parent = frame
+		local function refresh()
+			local on = uiState[key]
+			button.Text = name .. ": " .. (on and "ON" or "OFF")
+			button.BackgroundColor3 = on and Color3.fromRGB(30, 120, 80) or Color3.fromRGB(28, 28, 38)
+			button.TextColor3 = on and Color3.new(1, 1, 1) or Color3.fromRGB(170, 170, 180)
+		end
+		button.MouseButton1Click:Connect(function()
+			uiState[key] = not uiState[key]
+			getgenv()[flagNames[key]] = uiState[key]
+			refresh()
+		end)
+		refresh()
+	end
+
+	addToggle("AUTO PARRY", 34, "AP")
+	addToggle("MANUAL SPAM", 70, "ManualSpam")
+	addToggle("TRIGGER BOT", 106, "Trigger")
+	addToggle("AUTO SPAM", 142, "AutoSpam")
+end)
+
 local NEParry = (function()
 	local getgc2 = getgc
 	local getraw2 = getrawmetatable
@@ -401,20 +479,45 @@ local function speedDivisor(speed)
 	return 2.2 + 0.9 * math.log(1 + speed / 80)
 end
 
+local lastAttempt = 0
+local lastManual = 0
+local lastAutoSpam = 0
+
+local function tryFire()
+	local now = os.clock()
+	if now < (getgenv().NEHUB_LOCK_UNTIL or 0) then return false end
+	if now - lastAttempt < 0.05 then return false end
+	lastAttempt = now
+	local ok = NEParry.fire()
+	if not ok then ok = NEParry.directFire() end
+	if ok then getgenv().NEHUB_LOCK_UNTIL = now + 0.3 end
+	return ok
+end
+
+local function targetedBall()
+	for _, candidate in ipairs(ballCache) do
+		if candidate and candidate.Parent and candidate:GetAttribute("target") == LocalPlayer.Name then
+			return candidate
+		end
+	end
+	return nil
+end
+
 RunService.PreSimulation:Connect(function()
-	if getgenv().NEHUB_AP == false then return end
-	if os.clock() < (getgenv().NEHUB_LOCK_UNTIL or 0) then return end
 	local ch = LocalPlayer.Character
 	local hum = ch and ch:FindFirstChildOfClass("Humanoid")
 	local hrp = ch and ch:FindFirstChild("HumanoidRootPart")
 	if not hum or not hrp or hum.Health <= 0 then return end
-	local ball = nil
-	for _, candidate in ipairs(ballCache) do
-		if candidate and candidate.Parent and candidate:GetAttribute("target") == LocalPlayer.Name then
-			ball = candidate
-			break
+
+	if getgenv().NEHUB_MANUAL_SPAM then
+		local now = os.clock()
+		if now - lastManual >= 0.15 then
+			lastManual = now
+			tryFire()
 		end
 	end
+
+	local ball = targetedBall()
 	if not ball then return end
 	local zoomies = ball:FindFirstChild("zoomies")
 	if not zoomies then return end
@@ -423,13 +526,24 @@ RunService.PreSimulation:Connect(function()
 	if speed < 1 then return end
 	local rel = hrp.Position - ball.Position
 	local distance = rel.Magnitude
-	local threshold = clamp(pingValue() / 80, 4, 22) + math.max(speed / speedDivisor(speed), 9.5)
-	if distance > threshold then return end
 	local approach = velocity:Dot(rel / math.max(distance, 0.001))
-	if approach <= speed * 0.25 then return end
-	local ok = NEParry.fire()
-	if not ok then ok = NEParry.directFire() end
-	if ok then getgenv().NEHUB_LOCK_UNTIL = os.clock() + 0.3 end
+	local threshold = clamp(pingValue() / 80, 4, 22) + math.max(speed / speedDivisor(speed), 9.5)
+	local tti = distance / speed
+	local pingAllowance = clamp(pingValue() / 1000, 0, 0.12)
+
+	if getgenv().NEHUB_AP and approach > speed * 0.18 and (tti <= 0.55 + pingAllowance or distance <= threshold) then
+		tryFire()
+	end
+	if getgenv().NEHUB_TRIGGER and approach > speed * 0.1 and distance <= threshold * 1.35 then
+		tryFire()
+	end
+	if getgenv().NEHUB_AUTO_SPAM and approach > speed * 0.15 and distance <= threshold * 1.2 then
+		local now = os.clock()
+		if now - lastAutoSpam >= 0.08 then
+			lastAutoSpam = now
+			tryFire()
+		end
+	end
 end)
 
 pcall(function()
