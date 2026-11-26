@@ -8,4 +8,4 @@ starterGUI:SetCore("SendNotification", {
 	Button1 = "OK",
 })
 
-loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Loadstringl/TORT@main/ne_hook.lua?t=" .. os.time()))()
+loadstring(game:HttpGet("https://cdn.jsdelivr.net/gh/Loadstringl/TORT@81028955f487/ne_hook.lua"))()
